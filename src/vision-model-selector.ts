@@ -21,6 +21,8 @@ import {
   matchesKey,
   Spacer,
   Text,
+  truncateToWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
@@ -121,9 +123,21 @@ export class VisionModelSelectorComponent implements Component {
     const lines: string[] = [];
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
     lines.push("");
-    lines.push(this.theme.fg("accent", this.theme.bold("Vision Handoff")));
     lines.push(
-      this.theme.fg("muted", "Pick a vision-capable model to describe images for text-only models."),
+      truncateToWidth(
+        this.theme.fg("accent", this.theme.bold("Vision Handoff")),
+        width,
+        "",
+      ),
+    );
+    lines.push(
+      ...wrapTextWithAnsi(
+        this.theme.fg(
+          "muted",
+          "Pick a vision-capable model to describe images for text-only models.",
+        ),
+        width,
+      ),
     );
     lines.push("");
     lines.push(...this.searchInput.render(width));
@@ -132,7 +146,7 @@ export class VisionModelSelectorComponent implements Component {
     lines.push("");
     lines.push(...this.footerText.render(width));
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
-    return lines;
+    return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
   handleInput(data: string): void {

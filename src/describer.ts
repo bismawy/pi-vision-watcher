@@ -60,6 +60,7 @@ import {
   type VisionHandoffUsageRecord,
 } from "./usage.js";
 import { imageHash } from "./image.js";
+import { randomUUID } from "node:crypto";
 import { abortWireGuard, fetchInterceptorGuard, timeoutGuard, type AbortWire } from "./dispose.js";
 
 /** Tokens reserved for the describer's input so the requested output budget
@@ -133,17 +134,47 @@ function configSnapshot(cfg: VisionHandoffConfig): {
  * completeSimple() directly cannot resolve custom API ids such as `makora`.
  * The optional access preserves compatibility with older ModelRegistry versions,
  * which registered custom streams globally and do not expose the config getter. */
+const NEURALWATT_CONVERSATION_HEADER = "x-nw-conversation-id";
+
+function isolateVisionRequest(
+  model: Model<Api>,
+  options: SimpleStreamOptions,
+): SimpleStreamOptions {
+  const sessionId = `pi-vision-handoff:${randomUUID()}`;
+  const headers = { ...(options.headers ?? {}) };
+  const inheritedConversationHeader = Object.keys(headers).find(
+    (name) => name.toLowerCase() === NEURALWATT_CONVERSATION_HEADER,
+  );
+
+  // Provider auth can carry the active Pi conversation id. A describer call is
+  // an independent conversation: reusing that id makes an unrelated image
+  // prompt the newest cache lineage for the main agent. Give every real vision
+  // request its own identity while preserving all non-session auth headers.
+  if (inheritedConversationHeader) {
+    headers[inheritedConversationHeader] = sessionId;
+  } else if (model.provider.toLowerCase() === "neuralwatt") {
+    headers["X-NW-Conversation-ID"] = sessionId;
+  }
+
+  return {
+    ...options,
+    sessionId,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  };
+}
+
 export async function completeVisionModel(
   model: Model<Api>,
   modelRegistry: ModelRegistry,
   context: Context,
   options: SimpleStreamOptions,
 ): Promise<AssistantMessage> {
+  const isolatedOptions = isolateVisionRequest(model, options);
   const provider = modelRegistry.getRegisteredProviderConfig?.(model.provider);
   if (provider?.streamSimple && provider.api === model.api) {
-    return provider.streamSimple(model, context, options).result();
+    return provider.streamSimple(model, context, isolatedOptions).result();
   }
-  return completeSimple(model, context, options);
+  return completeSimple(model, context, isolatedOptions);
 }
 
 /** Dependencies the describer can't own itself (held by the engine). */

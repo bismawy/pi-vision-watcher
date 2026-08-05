@@ -194,6 +194,14 @@ describe("provider routing", () => {
     const streamSimple = vi.fn((_model: unknown, _context: unknown, _options: unknown) => ({ result }));
     const customRegistry = {
       ...modelRegistry,
+      getApiKeyAndHeaders: vi.fn(async () => ({
+        ok: true,
+        apiKey: "k",
+        headers: {
+          "X-NW-Conversation-ID": "main-pi-session",
+          "X-Custom-Auth": "preserved",
+        },
+      })),
       getRegisteredProviderConfig: vi.fn(() => ({ api: "custom-api", streamSimple })),
     } as any;
     const customModel = { ...visionModel, api: "custom-api" } as any;
@@ -203,9 +211,39 @@ describe("provider routing", () => {
     expect(out).toBe("custom provider description");
     expect(streamSimple).toHaveBeenCalledTimes(1);
     expect(streamSimple.mock.calls[0][0]).toBe(customModel);
-    expect(streamSimple.mock.calls[0][2]).toMatchObject({ apiKey: "k", maxTokens: 4096 });
+    const options = streamSimple.mock.calls[0][2] as {
+      apiKey: string;
+      maxTokens: number;
+      sessionId: string;
+      headers: Record<string, string>;
+    };
+    expect(options).toMatchObject({ apiKey: "k", maxTokens: 4096 });
+    expect(options.sessionId).toMatch(/^pi-vision-handoff:[0-9a-f-]{36}$/);
+    expect(options.headers).toEqual({
+      "X-NW-Conversation-ID": options.sessionId,
+      "X-Custom-Auth": "preserved",
+    });
     expect(result).toHaveBeenCalledTimes(1);
     expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it("adds an isolated NeuralWatt conversation id when provider auth has no inherited id", async () => {
+    const response = fakeResponse({ text: "neuralwatt description", stopReason: "stop" });
+    const result = vi.fn().mockResolvedValue(response);
+    const streamSimple = vi.fn((_model: unknown, _context: unknown, _options: unknown) => ({ result }));
+    const neuralwattModel = { ...visionModel, provider: "neuralwatt", api: "neuralwatt" } as any;
+    const registry = {
+      ...modelRegistry,
+      getRegisteredProviderConfig: vi.fn(() => ({ api: "neuralwatt", streamSimple })),
+    } as any;
+
+    await describeSingle(img("AAA"), "", neuralwattModel, registry, cfg, makeDeps());
+
+    const options = streamSimple.mock.calls[0][2] as {
+      sessionId: string;
+      headers: Record<string, string>;
+    };
+    expect(options.headers["X-NW-Conversation-ID"]).toBe(options.sessionId);
   });
 
   it("falls back to completeSimple when no matching extension stream is registered", async () => {
@@ -219,6 +257,9 @@ describe("provider routing", () => {
 
     expect(out).toBe("built-in description");
     expect(completeSimple).toHaveBeenCalledTimes(1);
+    expect(completeSimple.mock.calls[0][2].sessionId).toMatch(
+      /^pi-vision-handoff:[0-9a-f-]{36}$/,
+    );
   });
 });
 

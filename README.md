@@ -255,7 +255,7 @@ Because pi runs parallel `read` tool calls via `Promise.all` and fires each read
 | `context` (all messages) | `{ type: "input_image", image_url: "data:…" }` (OpenAI Responses) | detected by shape → replaced with `{ type: "input_text", text }` |
 | `context` (all messages) | `{ type: "image", source: { type: "base64", media_type, data } }` (Anthropic Messages) | detected by shape → replaced with `{ type: "text", text }` |
 
-The describer call itself goes through pi's normal model machinery (`completeSimple()`), **not** the agent event loop — so it never re-triggers `context` (no recursion). The `read` tool result keeps its image block untouched (kitty inline + `/resume`); only the `context`-cloned LLM-bound payload has images swapped for text.
+The describer call itself goes through pi's normal model machinery (`completeSimple()`), **not** the agent event loop — so it never re-triggers `context` (no recursion). Every real describer request receives a dedicated helper session ID. For Neuralwatt, the request also receives a matching isolated `X-NW-Conversation-ID` instead of inheriting the main Pi session ID; the unrelated image prompt therefore cannot replace the main agent's server-side cache lineage. The `read` tool result keeps its image block untouched (kitty inline + `/resume`); only the `context`-cloned LLM-bound payload has images swapped for text.
 
 ### Usage reporting
 

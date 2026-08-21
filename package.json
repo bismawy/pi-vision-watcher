@@ -1,6 +1,6 @@
 {
   "name": "pi-vision-watcher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Give text-only pi models vision — describe images with a vision model you pick via an interactive picker, then hand off the text description to non-vision models",
   "type": "module",
   "author": "bismawy",

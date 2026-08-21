@@ -22,7 +22,6 @@ import {
   Spacer,
   Text,
   truncateToWidth,
-  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -63,8 +62,6 @@ export class VisionModelSelectorComponent implements Component {
   private filteredItems: DisplayItem[];
   private selectedIndex = 0;
   private readonly maxVisible = 10;
-  /** Last render width — used to right-align the vision badge. 0 = unknown yet. */
-  private width = 0;
   private searchInput: Input;
   private listContainer: Container;
   private footerText: Text;
@@ -123,12 +120,6 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   render(width: number): string[] {
-    // Rebuild rows when the terminal width changes so the right-aligned badge
-    // stays glued to the right edge (buildItems is cheap: ≤ maxVisible rows).
-    if (this.width !== width) {
-      this.width = width;
-      this.updateList();
-    }
     const lines: string[] = [];
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
     lines.push("");
@@ -278,15 +269,14 @@ export class VisionModelSelectorComponent implements Component {
       reasoning: !!m.reasoning,
     });
 
-    // Vision-capable first (registry order), then the rest (registry order).
+    // Only vision-capable models are listed — a text-only model can't describe
+    // images, so it would only produce "[Image: description unavailable]" errors.
     const visionModels = allModels.filter((m) => isVisionModel(m)).map(make);
-    const textModels = allModels.filter((m) => !isVisionModel(m)).map(make);
-    return [...items, ...visionModels, ...textModels];
+    return [...items, ...visionModels];
   }
 
   private getFooterText(): string {
     const totalCount = this.allItems.length - 1; // exclude the None row
-    const visionCount = this.allItems.filter((i) => i.vision).length;
 
     const current = this.currentRef
       ? `current: ${this.currentRef}`
@@ -299,7 +289,7 @@ export class VisionModelSelectorComponent implements Component {
       `${keyText("app.thinking.cycle")} effort`,
       `ctrl+a async fallback`,
       `esc cancel`,
-      this.searchInput.getValue() ? `${this.filteredItems.length - 1} match` : `${totalCount} models · ${visionCount} vision`,
+      this.searchInput.getValue() ? `${this.filteredItems.length - 1} match` : `${totalCount} vision-capable models`,
     ];
 
     return this.theme.fg("dim", `  ${parts.join(" · ")} · ${current} `);
@@ -357,8 +347,8 @@ export class VisionModelSelectorComponent implements Component {
           ? this.theme.fg("accent", item.modelId)
           : item.modelId;
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
-        badge = item.vision ? this.theme.fg("success", "👀") : this.theme.fg("muted", "·");
-        label = `${labelled}${providerBadge}`;
+        badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
+        label = `${labelled}${providerBadge}${badge}`;
       }
 
       const current = item.ref === this.currentRef && item.ref !== null
@@ -367,19 +357,7 @@ export class VisionModelSelectorComponent implements Component {
           ? this.theme.fg("success", " ✓")
           : "";
 
-      const rowBase = `${prefix}${label}${current}`;
-      let row = rowBase;
-      if (badge) {
-        // Right-align the vision badge to the picker's right edge (1-col margin),
-        // so all model rows line up their 👀/· in one column.
-        const pad = this.width > 0 ? this.width - 1 - visibleWidth(rowBase) : -1;
-        if (pad > 1) {
-          row = rowBase + " ".repeat(pad) + badge;
-        } else {
-          row = rowBase + " " + badge;
-        }
-      }
-      this.listContainer.addChild(new Text(row, 0, 0));
+      this.listContainer.addChild(new Text(`${prefix}${label}${current}`, 0, 0));
     }
 
     if (startIndex > 0 || endIndex < this.filteredItems.length) {
@@ -403,13 +381,7 @@ export class VisionModelSelectorComponent implements Component {
           new Text(this.theme.fg("muted", `  Model Name: ${selected.modelName}`), 0, 0),
         );
         this.listContainer.addChild(
-          new Text(
-            this.theme.fg(
-              "dim",
-              `${selected.vision ? "👀 vision-capable — recommended describer" : "no native vision — not a good describer"}`,
-            ),
-            0, 0,
-          ),
+          new Text(this.theme.fg("dim", "  👀 vision-capable — recommended describer"), 0, 0),
         );
       }
       this.renderThinkingDetail(selected);

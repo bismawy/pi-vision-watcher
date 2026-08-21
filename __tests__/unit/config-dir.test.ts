@@ -22,12 +22,12 @@ describe("config dir uses getAgentDir", () => {
     expect(source).not.toMatch(/join\s*\([^)]*["']\.pi["']/);
   });
 
-  it("configures the extensions/ subdir with the pi-vision-handoff.json name", () => {
+  it("configures the extensions/ subdir with the pi-vision-watcher.json name", () => {
     const srcPath = join(process.cwd(), "src", "index.ts");
     const source = readFileSync(srcPath, "utf8");
 
     expect(source).toMatch(/CONFIG_SUBDIR\s*=\s*["']extensions["']/);
-    expect(source).toMatch(/CONFIG_FILENAME\s*=\s*["']pi-vision-handoff\.json["']/);
+    expect(source).toMatch(/CONFIG_FILENAME\s*=\s*["']pi-vision-watcher\.json["']/);
     expect(source).toMatch(/join\(getAgentDir\(\),\s*CONFIG_SUBDIR,\s*CONFIG_FILENAME\)/);
   });
 });

@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "ignoreExportsUsedInFile": true,
-  "entry": ["vision-handoff.ts"],
+  "entry": ["vision-watcher.ts"],
   "project": ["**/*.ts"]
 }

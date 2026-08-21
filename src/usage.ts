@@ -1,5 +1,5 @@
 /**
- * Describer usage + energy capture for pi-vision-handoff.
+ * Describer usage + energy capture for pi-vision-watcher.
  *
  * One record is produced per REAL describer provider call (cache hits emit
  * nothing):
@@ -10,13 +10,13 @@
  *     produce no comment lines, so the energy fields are OMITTED (not zeroed)
  *     for easy downstream filtering ("no energy" vs "zero energy").
  *
- * The caller (vision-handoff.ts) persists the record via pi.appendEntry (replays
+ * The caller (vision-watcher.ts) persists the record via pi.appendEntry (replays
  * on session resume/branch) AND emits it on pi.events so a live consumer can
  * filter on the one channel for tokens AND energy.
  *
- * Split out of vision-handoff.ts so the pure pieces (readEnergyFromTee,
+ * Split out of vision-watcher.ts so the pure pieces (readEnergyFromTee,
  * buildUsageRecord) and the concurrency-safe fetch interceptor are unit-testable
- * through the normal src/ import path — vision-handoff.ts runs readConfig() at
+ * through the normal src/ import path — vision-watcher.ts runs readConfig() at
  * module load and pulls in the TUI selector, so it is not unit-test-friendly.
  */
 
@@ -24,10 +24,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
 
 /** Custom session-entry type persisted via pi.appendEntry. */
-export const USAGE_ENTRY_TYPE = "vision-handoff-usage";
+export const USAGE_ENTRY_TYPE = "vision-watcher-usage";
 
 /** Event-bus channel emitted via pi.events. */
-export const USAGE_EVENT_CHANNEL = "vision-handoff:usage";
+export const USAGE_EVENT_CHANNEL = "vision-watcher:usage";
 
 /** Parsed Neuralwatt SSE-comment energy/cost/MCR data for one describer call. */
 export interface VisionHandoffEnergyCapture {
@@ -79,7 +79,7 @@ export interface VisionHandoffUsageRecord {
  * Parse Neuralwatt SSE comment lines (`: energy`, `: cost`, `: mcr-session`)
  * from a teed response body into a fresh capture object. Mirrors
  * pi-neuralwatt-provider's readEnergyFromTee but returns a result instead of
- * mutating module state — vision-handoff describes images concurrently (the
+ * mutating module state — vision-watcher describes images concurrently (the
  * before_agent_start warm-up fires several in parallel), so each call needs its
  * own capture routed via {@link describeAls}. For non-Neuralwatt vision models
  * no comment lines are present and the returned capture stays empty.

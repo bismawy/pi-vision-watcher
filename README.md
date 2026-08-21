@@ -12,9 +12,9 @@ Pick a vision model among your already-connected models; images pasted into pi a
 
 Text-only models ignore or reject images. This extension gives them sight:
 
-- You pick one **describer** (a vision-capable model) via `/vision-handoff`.
+- You pick one **describer** (a vision-capable model) via `/vision-watcher`.
 - Every image your model receives — pasted, attached, or read via the `read` tool — is described by that describer, and the description text is swapped in before the request reaches the provider.
-- **Automatic:** handoff applies to every model that lacks native vision (`/vision-handoff auto off` to stop).
+- **Automatic:** handoff applies to every model that lacks native vision (`/vision-watcher auto off` to stop).
 - **Cheap:** images in one turn share **one batched vision call** and are cached per image hash.
 
 The picker lists only **connected models** — those you've authenticated via `/login`, `/better-custom`, or a `models.json` `apiKey` — so the describer you pick is always one you can actually call. 👀 marks vision-capable models.
@@ -38,21 +38,21 @@ Then `/reload` or restart pi.
 
 | Command | Effect |
 |---|---|
-| `/vision-handoff` | Open the interactive picker and choose the vision model |
-| `/vision-handoff model <provider/id>` | Set the vision model directly |
-| `/vision-handoff status` | Show config + whether handoff is active for the current model |
-| `/vision-handoff enable` / `disable` | Master switch (keeps your chosen model) |
-| `/vision-handoff auto on\|off` | Apply handoff to all non-vision models |
-| `/vision-handoff add\|remove <provider/id>` | Force handoff for specific models (e.g. weak vision) |
-| `/vision-handoff thinking <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Describer reasoning effort |
-| `/vision-handoff prewarm on\|off` | Describe pasted images at paste-time (opt-in, TUI) |
-| `/vision-handoff fallback on\|off` | Async injection of pasted-path descriptions |
-| `/vision-handoff clear` | Clear the vision model (handoff inactive) |
-| `/vision-handoff help` | Full command reference |
+| `/vision-watcher` | Open the interactive picker and choose the vision model |
+| `/vision-watcher model <provider/id>` | Set the vision model directly |
+| `/vision-watcher status` | Show config + whether handoff is active for the current model |
+| `/vision-watcher enable` / `disable` | Master switch (keeps your chosen model) |
+| `/vision-watcher auto on\|off` | Apply handoff to all non-vision models |
+| `/vision-watcher add\|remove <provider/id>` | Force handoff for specific models (e.g. weak vision) |
+| `/vision-watcher thinking <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Describer reasoning effort |
+| `/vision-watcher prewarm on\|off` | Describe pasted images at paste-time (opt-in, TUI) |
+| `/vision-watcher fallback on\|off` | Async injection of pasted-path descriptions |
+| `/vision-watcher clear` | Clear the vision model (handoff inactive) |
+| `/vision-watcher help` | Full command reference |
 
 ## Config
 
-Created automatically at `~/.pi/agent/extensions/pi-vision-handoff.json`:
+Created automatically at `~/.pi/agent/extensions/pi-vision-watcher.json`:
 
 ```json
 {
@@ -83,7 +83,7 @@ Created automatically at `~/.pi/agent/extensions/pi-vision-handoff.json`:
 
 ## Troubleshooting
 
-- A failing describer surfaces as `pi-vision-handoff: image description failed — <reason>`; full detail (with stack/`stopReason`) is in `~/.pi/agent/logs/pi-vision-handoff/errors.log`.
+- A failing describer surfaces as `pi-vision-watcher: image description failed — <reason>`; full detail (with stack/`stopReason`) is in `~/.pi/agent/logs/pi-vision-watcher/errors.log`.
 - A failed image degrades to `[Image: description unavailable]` for that turn and is retried next turn — failures are never cached.
 
 ## Development
@@ -96,6 +96,6 @@ pnpm typecheck     # tsc --noEmit
 
 ## Credits & License
 
-`pi-vision-watcher` is a fork of [pi-vision-handoff](https://github.com/monotykamary/pi-vision-handoff) by [Tom X Nguyen](https://github.com/monotykamary), MIT (see [`LICENSE`](./LICENSE)). Fork changes: the picker lists only connected (authenticated) models, the package is renamed, and the vision-capable badge is 👀. The vision-handoff concept originated in [pi-umans-provider](https://github.com/monotykamary/pi-umans-provider).
+`pi-vision-watcher` is a fork of [pi-vision-watcher](https://github.com/monotykamary/pi-vision-watcher) by [Tom X Nguyen](https://github.com/monotykamary), MIT (see [`LICENSE`](./LICENSE)). Fork changes: the picker lists only connected (authenticated) models, the package is renamed, and the vision-capable badge is 👀. The vision-watcher concept originated in [pi-umans-provider](https://github.com/monotykamary/pi-umans-provider).
 
 MIT.

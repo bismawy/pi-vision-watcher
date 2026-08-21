@@ -51,8 +51,8 @@ function fullEntry(over: Partial<VisionErrorLogEntry> = {}): VisionErrorLogEntry
 
 describe("path resolution", () => {
   it("getErrorLogDir / getErrorLogPath resolve under $PI_CODING_AGENT_DIR", () => {
-    expect(getErrorLogDir()).toBe(join(dir, "logs", "pi-vision-handoff"));
-    expect(getErrorLogPath()).toBe(join(dir, "logs", "pi-vision-handoff", "errors.log"));
+    expect(getErrorLogDir()).toBe(join(dir, "logs", "pi-vision-watcher"));
+    expect(getErrorLogPath()).toBe(join(dir, "logs", "pi-vision-watcher", "errors.log"));
   });
 });
 

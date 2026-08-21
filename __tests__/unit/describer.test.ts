@@ -26,7 +26,7 @@ import { imageHash } from "../../src/image.js";
 import { getErrorLogPath, type VisionErrorLogEntry } from "../../src/error-log.js";
 
 // The describer now appends a structured error-log entry on every failure
-// (src/error-log.ts → ~/.pi/agent/logs/pi-vision-handoff/errors.log). Redirect
+// (src/error-log.ts → ~/.pi/agent/logs/pi-vision-watcher/errors.log). Redirect
 // $PI_CODING_AGENT_DIR to a temp dir for every test so the suite never writes
 // to the user's real log, and so the wiring can be asserted by reading it back.
 let logDir: string;
@@ -219,7 +219,7 @@ describe("provider routing", () => {
       headers: Record<string, string>;
     };
     expect(options).toMatchObject({ apiKey: "k", maxTokens: 4096 });
-    expect(options.sessionId).toMatch(/^pi-vision-handoff:[0-9a-f-]{36}$/);
+    expect(options.sessionId).toMatch(/^pi-vision-watcher:[0-9a-f-]{36}$/);
     expect(options.headers).toEqual({
       "X-NW-Conversation-ID": options.sessionId,
       "X-Custom-Auth": "preserved",
@@ -259,7 +259,7 @@ describe("provider routing", () => {
     expect(out).toBe("built-in description");
     expect(completeSimple).toHaveBeenCalledTimes(1);
     expect(completeSimple.mock.calls[0][2].sessionId).toMatch(
-      /^pi-vision-handoff:[0-9a-f-]{36}$/,
+      /^pi-vision-watcher:[0-9a-f-]{36}$/,
     );
   });
 });

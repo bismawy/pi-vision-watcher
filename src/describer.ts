@@ -140,7 +140,7 @@ function isolateVisionRequest(
   model: Model<Api>,
   options: SimpleStreamOptions,
 ): SimpleStreamOptions {
-  const sessionId = `pi-vision-handoff:${randomUUID()}`;
+  const sessionId = `pi-vision-watcher:${randomUUID()}`;
   const headers = { ...(options.headers ?? {}) };
   const inheritedConversationHeader = Object.keys(headers).find(
     (name) => name.toLowerCase() === NEURALWATT_CONVERSATION_HEADER,

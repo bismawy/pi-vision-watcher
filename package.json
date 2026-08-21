@@ -1,6 +1,6 @@
 {
   "name": "pi-vision-watcher",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Give text-only pi models vision — describe images with a vision model you pick via an interactive picker, then hand off the text description to non-vision models",
   "type": "module",
   "author": "bismawy",
@@ -51,7 +51,7 @@
   },
   "pi": {
     "extensions": [
-      "./vision-handoff.ts"
+      "./vision-watcher.ts"
     ]
   },
   "peerDependencies": {

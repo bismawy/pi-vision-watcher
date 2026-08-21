@@ -1016,12 +1016,16 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
     return;
   }
 
-  const allModels = ctx.modelRegistry
-    .getAll()
+  // Only list models that are actually connected (configured auth via /login,
+  // /better-custom, a models.json apiKey, or env/command keys) — the same set
+  // the built-in /model picker shows. getAvailable() excludes the whole
+  // catalogue of unauthenticated models.
+  const availableModels = ctx.modelRegistry
+    .getAvailable()
     .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }));
 
   if (ctx.mode !== "tui") {
-    const modelItems = ["None", ...allModels.map((m) => `${m.provider}/${m.id}`)];
+    const modelItems = ["None", ...availableModels.map((m) => `${m.provider}/${m.id}`)];
     const modelPick = await ctx.ui.select("Vision model", modelItems);
     if (modelPick === undefined) return;
     const ref = modelPick === "None" ? null : modelPick;
@@ -1049,7 +1053,7 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   const result = await ctx.ui.custom<VisionModelSelectorResult>((tui, theme, _kb, done) => {
     const selector = new VisionModelSelectorComponent(
       theme,
-      allModels,
+      availableModels,
       config.visionModel,
       config.thinking,
       config.thinkingLevel,

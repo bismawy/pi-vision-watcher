@@ -26,7 +26,7 @@ The `pi-umans-provider` extension quietly solved this for GLM 5.1: a hardcoded "
 
 `pi-vision-handoff` extracts that pipeline and makes it **provider-agnostic**:
 
-- **Pick any vision-capable model** from your registry via an interactive picker — OpenAI, Anthropic, Google, Ollama, or any custom provider pi knows about.
+- **Pick any vision-capable model** from your connected models via an interactive picker — only models you've authenticated (via `/login` or `/better-custom`) are listed, so the describer is always one you can actually call.
 - Your choice **persists** to `~/.pi/agent/extensions/pi-vision-handoff.json`.
 - For any model that doesn't declare image input (or any model you explicitly target), `pi-vision-handoff` describes the image with your chosen vision model and swaps the image block for its description text at the **`context`** event — which fires *before* pi-ai's `downgradeUnsupportedImages` can strip image blocks for non-vision models. This covers every image source: pasted/attached images, `read`-tool results, and custom extension-injected messages. (Read-tool images additionally keep the description + image in the stored `tool_result` for kitty inline rendering and `/resume`.)
 - Works across all four image-block shapes pi uses — the three provider-transformed formats (OpenAI Chat Completions, OpenAI Responses, Anthropic Messages) plus pi-ai's internal `{ type: "image", data, mimeType }` emitted by the `read` tool — detected by shape.
@@ -36,7 +36,7 @@ No `settings.json` touched. No per-provider glue. Pick a describer once and ever
 
 ## Features
 
-- **🎮 Interactive picker** — `/vision-handoff` opens a TUI listing every model, vision-capable ones first (👁), to choose your describer.
+- **🎮 Interactive picker** — `/vision-handoff` opens a TUI listing every connected (authenticated) model, vision-capable ones first (👁), to choose your describer.
 - **🖼️ DataLoader-batched descriptions** — the `read` tools are `load()` callers: N parallel reads coalesce into ONE batched vision call (dispatched via `setImmediate` after the poll phase, so reads completing together batch instead of splitting), awaited during the tool-result phase (free time) so the agent's next turn never blocks on the describer. Descriptions are ready before `context` fires, so the swap is a non-blocking cache hit.
 - **🧹 Hides pi's "model does not support images" note** — on read results the extension strips pi's `[Current model does not support images…]` note from the text block (it's misleading once the handoff delivers the image's content as text), while keeping the image block for kitty inline rendering and `/resume`.
 - **🔌 Provider-agnostic** — uses pi's own model execution machinery (`@earendil-works/pi-ai`'s `completeSimple()`), so it works with any provider/configured model, including custom provider extensions.

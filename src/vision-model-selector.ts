@@ -3,7 +3,7 @@
  * describes images during vision handoff.
  *
  * Uses the same patterns as pi's built-in selectors and pi-hide-providers:
- * - Lists all models, vision-capable ones first (👁 badge)
+ * - Lists connected (authenticated) models, vision-capable ones first (👁 badge)
  * - A leading "None" row clears the configured vision model
  * - Search/filter via Input component
  * - Enter or Ctrl+S confirms the highlighted model and saves

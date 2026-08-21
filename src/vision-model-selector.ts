@@ -3,7 +3,7 @@
  * describes images during vision handoff.
  *
  * Uses the same patterns as pi's built-in selectors and pi-hide-providers:
- * - Lists connected (authenticated) models, vision-capable ones first (👁 badge)
+ * - Lists connected (authenticated) models, vision-capable ones first (👀 badge)
  * - A leading "None" row clears the configured vision model
  * - Search/filter via Input component
  * - Enter or Ctrl+S confirms the highlighted model and saves
@@ -346,7 +346,7 @@ export class VisionModelSelectorComponent implements Component {
         const labelled = isSelected
           ? this.theme.fg("accent", item.modelId)
           : item.modelId;
-        const badge = item.vision ? this.theme.fg("success", " 👁") : this.theme.fg("muted", " ·");
+        const badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
         label = `${labelled}${providerBadge}${badge}`;
       }
@@ -384,7 +384,7 @@ export class VisionModelSelectorComponent implements Component {
           new Text(
             this.theme.fg(
               "dim",
-              `${selected.vision ? "👁 vision-capable — recommended describer" : "no native vision — not a good describer"}`,
+              `${selected.vision ? "👀 vision-capable — recommended describer" : "no native vision — not a good describer"}`,
             ),
             0, 0,
           ),

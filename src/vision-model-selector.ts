@@ -339,15 +339,14 @@ export class VisionModelSelectorComponent implements Component {
       const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
 
       let label: string;
-      let badge = "";
       if (item.none) {
         label = this.theme.fg("warning", item.modelName);
       } else {
         const labelled = isSelected
           ? this.theme.fg("accent", item.modelId)
           : item.modelId;
+        const badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
-        badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
         label = `${labelled}${providerBadge}${badge}`;
       }
 

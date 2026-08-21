@@ -125,7 +125,7 @@ export class VisionModelSelectorComponent implements Component {
     lines.push("");
     lines.push(
       truncateToWidth(
-        this.theme.fg("accent", this.theme.bold("Vision Handoff")),
+        this.theme.fg("accent", this.theme.bold("Vision Watcher")),
         width,
         "",
       ),

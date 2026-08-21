@@ -59,7 +59,7 @@ vi.mock("../../src/image.js", async (importActual) => {
   };
 });
 
-import factory from "../../vision-handoff.js";
+import factory from "../../vision-watcher.js";
 import { UNAVAILABLE } from "../../src/dataloader.js";
 
 interface CapturedPi {
@@ -319,7 +319,7 @@ describe("async pasted-path fallback race", () => {
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        customType: "vision-handoff-async",
+        customType: "vision-watcher-async",
         content: expect.stringContaining("[Image: desc-for-"),
         display: true,
         details: { imageCount: 1 },
@@ -372,7 +372,7 @@ describe("async pasted-path fallback race", () => {
   it("renders a dim summary until expanded, then dims the expanded body per line", () => {
     const { pi } = setup();
     const renderer = pi.registerMessageRenderer.mock.calls.find(
-      ([customType]) => customType === "vision-handoff-async",
+      ([customType]) => customType === "vision-watcher-async",
     )?.[1];
     const fg = vi.fn((_color: string, text: string) => text);
     const theme = { fg };

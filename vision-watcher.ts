@@ -1,11 +1,11 @@
 /**
- * pi-vision-handoff — give text-only models vision by proxying image input
+ * pi-vision-watcher — give text-only models vision by proxying image input
  * through a vision-capable model of your choice.
  *
  * Extracted from the GLM 5.1 vision-handoff pipeline in pi-umans-provider and
  * generalized: instead of a hardcoded describer, the user picks any
  * vision-capable model from the registry via an interactive picker, and the
- * choice is persisted to ~/.pi/agent/extensions/pi-vision-handoff.json.
+ * choice is persisted to ~/.pi/agent/extensions/pi-vision-watcher.json.
  *
  * Pipeline (provider-agnostic via @earendil-works/pi-ai's complete()):
  *   before_agent_start → warm the description cache for attached images AND
@@ -19,7 +19,7 @@
  *   context → swap any remaining image blocks for their (now cached) text
  *     description on the cloned LLM-bound payload.
  *
- * This file is the wiring layer: pi event handlers + the /vision-handoff
+ * This file is the wiring layer: pi event handlers + the /vision-watcher
  * command. The dataloader (`src/dataloader.ts`), describer (`src/describer.ts`),
  * image IO (`src/image.ts`), resource guards (`src/dispose.ts`), config/types
  * (`src/index.ts`), and usage/energy (`src/usage.ts`) live in `src/`.
@@ -174,7 +174,7 @@ function scheduleAsyncClipboardInjection(
     try {
       pi.sendMessage(
         {
-          customType: "vision-handoff-async",
+          customType: "vision-watcher-async",
           content,
           display: true,
           details: { imageCount: entries.length },
@@ -307,7 +307,7 @@ function notifyUnresolvedVisionModel(ctx: ExtensionContext, ref: string): void {
   visionModelUnresolvedRef = ref;
   if (ctx.hasUI) {
     ctx.ui.notify(
-      `pi-vision-handoff: configured vision model "${ref}" was not found in the registry — run /vision-handoff to pick a model.`,
+      `pi-vision-watcher: configured vision model "${ref}" was not found in the registry — run /vision-watcher to pick a model.`,
       "warning",
     );
   }
@@ -345,7 +345,7 @@ function warnFailedImages(
   });
   if (!ctx.hasUI) return;
   ctx.ui.notify(
-    `pi-vision-handoff: image description failed — ${reason}. Vision model: ${config.visionModel}`,
+    `pi-vision-watcher: image description failed — ${reason}. Vision model: ${config.visionModel}`,
     "warning",
   );
 }
@@ -353,7 +353,7 @@ function warnFailedImages(
 export default function (pi: ExtensionAPI) {
   config = readConfig();
 
-  pi.registerMessageRenderer("vision-handoff-async", (message, { expanded }, theme) => {
+  pi.registerMessageRenderer("vision-watcher-async", (message, { expanded }, theme) => {
     const details = message.details as { imageCount?: number } | undefined;
     const count = details?.imageCount ?? 1;
     const label = `Vision handoff · ${count} pasted image${count === 1 ? "" : "s"}`;
@@ -726,13 +726,13 @@ export default function (pi: ExtensionAPI) {
     if (!model) return;
     if (isHandoffTarget(model, config) && !isVisionModel(model)) {
       ctx.ui.notify(
-        `pi-vision-handoff: active — images will be described by ${config.visionModel}`,
+        `pi-vision-watcher: active — images will be described by ${config.visionModel}`,
         "info",
       );
     }
   });
 
-  pi.registerCommand("vision-handoff", {
+  pi.registerCommand("vision-watcher", {
     description: HANDOFF_COMMAND_DESCRIPTION,
     getArgumentCompletions(prefix: string) {
       const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "fallback", "add", "remove", "clear", "help"];
@@ -750,7 +750,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
   const subcommand = parts[0]?.toLowerCase() ?? "";
   const rest = parts.slice(1).join(" ");
 
-  // /vision-handoff (no args) or /vision-handoff select — interactive picker
+  // /vision-watcher (no args) or /vision-watcher select — interactive picker
   if (!subcommand || subcommand === "select") {
     await showSelector(ctx);
     return;
@@ -759,26 +759,26 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
   if (subcommand === "help") {
     ctx.ui.notify(
       [
-        "pi-vision-handoff commands:",
-        "  /vision-handoff                 Open interactive picker to choose the vision model",
-        "  /vision-handoff select         Same as /vision-handoff",
-        "  /vision-handoff model <p/id>   Set the vision model directly",
-        "  /vision-handoff status         Show current config and active state",
-        "  /vision-handoff enable         Enable vision handoff",
-        "  /vision-handoff disable        Disable vision handoff (keeps configured model)",
-        "  /vision-handoff auto <on|off>  Toggle automatic handoff for all non-vision models",
-        "  /vision-handoff thinking <off|minimal|low|medium|high|xhigh|max>",
+        "pi-vision-watcher commands:",
+        "  /vision-watcher                 Open interactive picker to choose the vision model",
+        "  /vision-watcher select         Same as /vision-watcher",
+        "  /vision-watcher model <p/id>   Set the vision model directly",
+        "  /vision-watcher status         Show current config and active state",
+        "  /vision-watcher enable         Enable vision handoff",
+        "  /vision-watcher disable        Disable vision handoff (keeps configured model)",
+        "  /vision-watcher auto <on|off>  Toggle automatic handoff for all non-vision models",
+        "  /vision-watcher thinking <off|minimal|low|medium|high|xhigh|max>",
         "                               Set the vision describer's thinking effort (off = disabled)",
-        "  /vision-handoff prewarm <on|off>",
+        "  /vision-watcher prewarm <on|off>",
         "                               Toggle describing pasted images at paste-time (opt-in, off by default)",
-        "  /vision-handoff fallback <on|off>",
+        "  /vision-watcher fallback <on|off>",
         "                               Inject pasted-image descriptions asynchronously when no matching read wins",
-        "  /vision-handoff add <p/id>     Force handoff for an extra model",
-        "  /vision-handoff remove <p/id>  Stop forcing handoff for a model",
-        "  /vision-handoff clear          Clear the configured vision model",
-        "  /vision-handoff help           This message",
+        "  /vision-watcher add <p/id>     Force handoff for an extra model",
+        "  /vision-watcher remove <p/id>  Stop forcing handoff for a model",
+        "  /vision-watcher clear          Clear the configured vision model",
+        "  /vision-watcher help           This message",
         "",
-        "Config: ~/.pi/agent/extensions/pi-vision-handoff.json",
+        "Config: ~/.pi/agent/extensions/pi-vision-watcher.json",
         "Mechanism: before_agent_start warms a description cache; tool_result loads",
         "  read images through a dataloader (one batched vision call); context swaps",
         "  image blocks in the payload for the cached text description.",
@@ -808,7 +808,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
   if (subcommand === "auto") {
     const value = rest.toLowerCase();
     if (value !== "on" && value !== "off") {
-      ctx.ui.notify("Usage: /vision-handoff auto <on|off>", "warning");
+      ctx.ui.notify("Usage: /vision-watcher auto <on|off>", "warning");
       return;
     }
     const on = value === "on";
@@ -846,7 +846,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
 
   if (subcommand === "model") {
     if (!rest) {
-      ctx.ui.notify("Usage: /vision-handoff model <provider/id>", "warning");
+      ctx.ui.notify("Usage: /vision-watcher model <provider/id>", "warning");
       return;
     }
     const parsed = parseModelRef(rest);
@@ -856,7 +856,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
     }
     const model = ctx.modelRegistry.find(parsed.provider, parsed.id);
     if (!model) {
-      ctx.ui.notify(`Model not found: ${rest}. Use /vision-handoff to pick from the list.`, "error");
+      ctx.ui.notify(`Model not found: ${rest}. Use /vision-watcher to pick from the list.`, "error");
       return;
     }
     const ref = formatModelRef(parsed.provider, parsed.id);
@@ -872,7 +872,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
 
   if (subcommand === "add") {
     if (!rest) {
-      ctx.ui.notify("Usage: /vision-handoff add <provider/id>", "warning");
+      ctx.ui.notify("Usage: /vision-watcher add <provider/id>", "warning");
       return;
     }
     const parsed = parseModelRef(rest);
@@ -891,7 +891,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
 
   if (subcommand === "remove") {
     if (!rest) {
-      ctx.ui.notify("Usage: /vision-handoff remove <provider/id>", "warning");
+      ctx.ui.notify("Usage: /vision-watcher remove <provider/id>", "warning");
       return;
     }
     const parsed = parseModelRef(rest);
@@ -912,7 +912,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
     return;
   }
 
-  ctx.ui.notify(`Unknown subcommand: "${subcommand}". Use /vision-handoff help for usage.`, "warning");
+  ctx.ui.notify(`Unknown subcommand: "${subcommand}". Use /vision-watcher help for usage.`, "warning");
 }
 
 function updateConfig(
@@ -929,7 +929,7 @@ function updateConfig(
   ctx.ui.notify(`${message} (config: ${path})`, "info");
 }
 
-/** Resolve a `/vision-handoff thinking <level>` argument into a
+/** Resolve a `/vision-watcher thinking <level>` argument into a
  *  `(thinking, thinkingLevel)` pair. `off` disables thinking; any of the
  *  {@link THINKING_LEVELS} enables it at that effort. */
 function handleThinkingSubcommand(ctx: ExtensionCommandContext, rest: string): void {
@@ -937,7 +937,7 @@ function handleThinkingSubcommand(ctx: ExtensionCommandContext, rest: string): v
   if (!arg) {
     ctx.ui.notify(
       `Thinking: ${config.thinking ? `on (${config.thinkingLevel})` : "off"}.\n` +
-        `Usage: /vision-handoff thinking <off|minimal|low|medium|high|xhigh|max>`,
+        `Usage: /vision-watcher thinking <off|minimal|low|medium|high|xhigh|max>`,
       "info",
     );
     return;
@@ -961,43 +961,43 @@ function handleThinkingSubcommand(ctx: ExtensionCommandContext, rest: string): v
   );
 }
 
-/** Handle `/vision-handoff prewarm <on|off>` — toggle paste-time prewarm. */
+/** Handle `/vision-watcher prewarm <on|off>` — toggle paste-time prewarm. */
 function handlePrewarmSubcommand(ctx: ExtensionCommandContext, rest: string): void {
   const value = rest.trim().toLowerCase();
   if (!value) {
     ctx.ui.notify(
       `Paste-time prewarm: ${config.prewarmPastedImages ? "on" : "off"}.\n` +
-        `Usage: /vision-handoff prewarm <on|off>`,
+        `Usage: /vision-watcher prewarm <on|off>`,
       "info",
     );
     return;
   }
   if (value !== "on" && value !== "off") {
-    ctx.ui.notify("Usage: /vision-handoff prewarm <on|off>", "warning");
+    ctx.ui.notify("Usage: /vision-watcher prewarm <on|off>", "warning");
     return;
   }
   const on = value === "on";
   const note = on
     ? editorInstalled
       ? "Paste-time prewarm on — pasted images are described the instant their path lands in the prompt (before submit)."
-      : "Paste-time prewarm on — but another custom editor extension is active, so it's unavailable. Submit-time prewarm still works; disable the other editor extension (or /vision-handoff prewarm off) to silence this."
+      : "Paste-time prewarm on — but another custom editor extension is active, so it's unavailable. Submit-time prewarm still works; disable the other editor extension (or /vision-watcher prewarm off) to silence this."
     : "Paste-time prewarm off — images are described at submit time (default).";
   updateConfig(ctx, (c) => ({ ...c, prewarmPastedImages: on }), note);
 }
 
-/** Handle /vision-handoff fallback <on|off>. */
+/** Handle /vision-watcher fallback <on|off>. */
 function handleFallbackSubcommand(ctx: ExtensionCommandContext, rest: string): void {
   const value = rest.trim().toLowerCase();
   if (!value) {
     ctx.ui.notify(
       `Async pasted-path fallback: ${config.asyncClipboardHandoff ? "on" : "off"}.\n` +
-        "Usage: /vision-handoff fallback <on|off>",
+        "Usage: /vision-watcher fallback <on|off>",
       "info",
     );
     return;
   }
   if (value !== "on" && value !== "off") {
-    ctx.ui.notify("Usage: /vision-handoff fallback <on|off>", "warning");
+    ctx.ui.notify("Usage: /vision-watcher fallback <on|off>", "warning");
     return;
   }
   const on = value === "on";
@@ -1012,7 +1012,7 @@ function handleFallbackSubcommand(ctx: ExtensionCommandContext, rest: string): v
 
 async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) {
-    ctx.ui.notify("/vision-handoff requires interactive mode.", "error");
+    ctx.ui.notify("/vision-watcher requires interactive mode.", "error");
     return;
   }
 
@@ -1101,7 +1101,7 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
 function showStatus(ctx: ExtensionCommandContext): void {
   const lines: string[] = [];
   lines.push(`Vision handoff: ${config.enabled ? "enabled" : "disabled"}`);
-  lines.push(`Vision model: ${config.visionModel ?? "(none — pick one with /vision-handoff)"}`);
+  lines.push(`Vision model: ${config.visionModel ?? "(none — pick one with /vision-watcher)"}`);
   lines.push(`Auto handoff (non-vision models): ${config.autoHandoff ? "on" : "off"}`);
   lines.push(`Handoff targets (explicit): ${config.handoffModels.length ? config.handoffModels.join(", ") : "(none)"}`);
   lines.push(`Thinking: ${config.thinking ? `on (${config.thinkingLevel})` : "off"}`);

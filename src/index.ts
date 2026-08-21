@@ -1,7 +1,7 @@
 /**
- * Shared constants, types, and utilities for pi-vision-handoff.
+ * Shared constants, types, and utilities for pi-vision-watcher.
  *
- * Config lives at ~/.pi/agent/extensions/pi-vision-handoff.json — the same
+ * Config lives at ~/.pi/agent/extensions/pi-vision-watcher.json — the same
  * convention pi-model-sort uses for picker-backed extensions.
  */
 
@@ -16,16 +16,16 @@ export * from "./usage.js";
 const CONFIG_SUBDIR = "extensions";
 
 /** Config file name. */
-export const CONFIG_FILENAME = "pi-vision-handoff.json";
+export const CONFIG_FILENAME = "pi-vision-watcher.json";
 
-/** Full config path: ~/.pi/agent/extensions/pi-vision-handoff.json */
+/** Full config path: ~/.pi/agent/extensions/pi-vision-watcher.json */
 export function getConfigPath(): string {
   return join(getAgentDir(), CONFIG_SUBDIR, CONFIG_FILENAME);
 }
 
 /** Description shown in the / commands list. */
 export const HANDOFF_COMMAND_DESCRIPTION =
-  "Configure vision handoff — pick a vision model to describe images for text-only models";
+  "Configure vision watcher — pick a vision model to describe images for text-only models";
 
 /** Default system prompt for the vision describer. Mirrors the pi-umans-provider pipeline. */
 export const DEFAULT_VISION_PROMPT =

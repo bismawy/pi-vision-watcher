@@ -291,7 +291,7 @@ describe("config round-trip via PI_CODING_AGENT_DIR", () => {
   let savedEnv: string | undefined;
 
   beforeEach(() => {
-    tmpHome = mkdtempSync(join(tmpdir(), "pi-vision-handoff-"));
+    tmpHome = mkdtempSync(join(tmpdir(), "pi-vision-watcher-"));
     savedEnv = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = tmpHome;
   });
@@ -302,9 +302,9 @@ describe("config round-trip via PI_CODING_AGENT_DIR", () => {
     else process.env.PI_CODING_AGENT_DIR = savedEnv;
   });
 
-  it("writes to ~/.pi-equivalent/extensions/pi-vision-handoff.json", () => {
+  it("writes to ~/.pi-equivalent/extensions/pi-vision-watcher.json", () => {
     const path = writeConfig({ ...DEFAULT_CONFIG, visionModel: "openai/gpt-4o" });
-    expect(path).toBe(join(tmpHome, "extensions", "pi-vision-handoff.json"));
+    expect(path).toBe(join(tmpHome, "extensions", "pi-vision-watcher.json"));
     expect(existsSync(path)).toBe(true);
 
     const onDisk = JSON.parse(readFileSync(path, "utf8")) as VisionHandoffConfig;
@@ -332,12 +332,12 @@ describe("config round-trip via PI_CODING_AGENT_DIR", () => {
   it("readConfig tolerates a corrupt file", () => {
     const dir = join(tmpHome, "extensions");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "pi-vision-handoff.json"), "{not json", "utf8");
+    writeFileSync(join(dir, "pi-vision-watcher.json"), "{not json", "utf8");
     expect(readConfig()).toEqual(DEFAULT_CONFIG);
   });
 
-  it("getConfigPath points at extensions/pi-vision-handoff.json", () => {
-    expect(getConfigPath()).toBe(join(tmpHome, "extensions", "pi-vision-handoff.json"));
+  it("getConfigPath points at extensions/pi-vision-watcher.json", () => {
+    expect(getConfigPath()).toBe(join(tmpHome, "extensions", "pi-vision-watcher.json"));
   });
 });
 

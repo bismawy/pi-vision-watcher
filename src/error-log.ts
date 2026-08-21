@@ -1,10 +1,10 @@
 /**
- * Best-effort structured error logging for pi-vision-handoff.
+ * Best-effort structured error logging for pi-vision-watcher.
  *
  * Every describer failure (auth error, network error, abort, empty response,
  * stopReason error/aborted, timeout) and every user-facing "image description
  * failed" warning is appended as one JSONL line to
- *   ~/.pi/agent/logs/pi-vision-handoff/errors.log
+ *   ~/.pi/agent/logs/pi-vision-watcher/errors.log
  * (resolvable via $PI_CODING_AGENT_DIR, like every other pi path).
  *
  * This is the troubleshooting surface for the "image description failed —
@@ -27,7 +27,7 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from "nod
 import { join } from "node:path";
 
 /** Subdirectory under the pi agent dir holding this extension's logs. */
-const LOG_SUBDIR = "logs/pi-vision-handoff";
+const LOG_SUBDIR = "logs/pi-vision-watcher";
 /** Active log file name. */
 const LOG_FILENAME = "errors.log";
 
@@ -74,7 +74,7 @@ export interface VisionErrorLogEntry {
 }
 
 /** Directory holding this extension's logs:
- *  ~/.pi/agent/logs/pi-vision-handoff (overridable via $PI_CODING_AGENT_DIR). */
+ *  ~/.pi/agent/logs/pi-vision-watcher (overridable via $PI_CODING_AGENT_DIR). */
 export function getErrorLogDir(): string {
   return join(getAgentDir(), LOG_SUBDIR);
 }

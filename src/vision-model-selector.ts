@@ -22,6 +22,7 @@ import {
   Spacer,
   Text,
   truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -62,6 +63,8 @@ export class VisionModelSelectorComponent implements Component {
   private filteredItems: DisplayItem[];
   private selectedIndex = 0;
   private readonly maxVisible = 10;
+  /** Last render width — used to right-align the vision badge. 0 = unknown yet. */
+  private width = 0;
   private searchInput: Input;
   private listContainer: Container;
   private footerText: Text;
@@ -120,6 +123,12 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   render(width: number): string[] {
+    // Rebuild rows when the terminal width changes so the right-aligned badge
+    // stays glued to the right edge (buildItems is cheap: ≤ maxVisible rows).
+    if (this.width !== width) {
+      this.width = width;
+      this.updateList();
+    }
     const lines: string[] = [];
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
     lines.push("");
@@ -340,15 +349,16 @@ export class VisionModelSelectorComponent implements Component {
       const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
 
       let label: string;
+      let badge = "";
       if (item.none) {
         label = this.theme.fg("warning", item.modelName);
       } else {
         const labelled = isSelected
           ? this.theme.fg("accent", item.modelId)
           : item.modelId;
-        const badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
-        label = `${labelled}${providerBadge}${badge}`;
+        badge = item.vision ? this.theme.fg("success", "👀") : this.theme.fg("muted", "·");
+        label = `${labelled}${providerBadge}`;
       }
 
       const current = item.ref === this.currentRef && item.ref !== null
@@ -357,7 +367,19 @@ export class VisionModelSelectorComponent implements Component {
           ? this.theme.fg("success", " ✓")
           : "";
 
-      this.listContainer.addChild(new Text(`${prefix}${label}${current}`, 0, 0));
+      const rowBase = `${prefix}${label}${current}`;
+      let row = rowBase;
+      if (badge) {
+        // Right-align the vision badge to the picker's right edge (1-col margin),
+        // so all model rows line up their 👀/· in one column.
+        const pad = this.width > 0 ? this.width - 1 - visibleWidth(rowBase) : -1;
+        if (pad > 1) {
+          row = rowBase + " ".repeat(pad) + badge;
+        } else {
+          row = rowBase + " " + badge;
+        }
+      }
+      this.listContainer.addChild(new Text(row, 0, 0));
     }
 
     if (startIndex > 0 || endIndex < this.filteredItems.length) {

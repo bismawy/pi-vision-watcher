@@ -16,6 +16,17 @@ _Describe images with a vision model you pick, then feed the text to models that
 
 ---
 
+## Credits
+
+`pi-vision-watcher` is a fork of [pi-vision-handoff](https://github.com/monotykamary/pi-vision-handoff) by [Tom X Nguyen](https://github.com/monotykamary), licensed under MIT (see [`LICENSE`](./LICENSE)).
+
+Changes in this fork:
+- The `/vision-handoff` picker lists only **connected (authenticated) models** (`getAvailable()`), not the whole registry.
+- Package renamed to `pi-vision-watcher`; runtime config file (`pi-vision-handoff.json`) and command name are unchanged.
+- Vision-capable badge uses 👀.
+
+---
+
 ## The Problem
 
 Some of the best coding models are blind. You paste a screenshot, a UI mock, a stack trace, or a diagram into pi — and a text-only model either silently ignores the image or rejects the request outright. Up to now your only options were to describe the image yourself, or switch to a (often weaker-for-coding) vision model just to read it.

@@ -1,13 +1,13 @@
 <div align="center">
 
-# 👁️ pi-vision-handoff
+# 👀 pi-vision-watcher
 
 **Give text-only [pi](https://github.com/earendil-works/pi-coding-agent) models vision**
 
 _Describe images with a vision model you pick, then feed the text to models that can't see._
 
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
-[![npm](https://img.shields.io/npm/v/pi-vision-handoff)](https://www.npmjs.com/package/pi-vision-handoff)
+[![npm](https://img.shields.io/npm/v/pi-vision-watcher)](https://www.npmjs.com/package/pi-vision-watcher)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 <img src="https://raw.githubusercontent.com/monotykamary/pi-vision-handoff/main/assets/vision-handoff.jpg" alt="Vision Handoff picker — an interactive TUI listing every model, vision-capable ones marked with an eye, to choose the describer for text-only models" width="820">
@@ -36,7 +36,7 @@ No `settings.json` touched. No per-provider glue. Pick a describer once and ever
 
 ## Features
 
-- **🎮 Interactive picker** — `/vision-handoff` opens a TUI listing every connected (authenticated) model, vision-capable ones first (👁), to choose your describer.
+- **🎮 Interactive picker** — `/vision-handoff` opens a TUI listing every connected (authenticated) model, vision-capable ones first (👀), to choose your describer.
 - **🖼️ DataLoader-batched descriptions** — the `read` tools are `load()` callers: N parallel reads coalesce into ONE batched vision call (dispatched via `setImmediate` after the poll phase, so reads completing together batch instead of splitting), awaited during the tool-result phase (free time) so the agent's next turn never blocks on the describer. Descriptions are ready before `context` fires, so the swap is a non-blocking cache hit.
 - **🧹 Hides pi's "model does not support images" note** — on read results the extension strips pi's `[Current model does not support images…]` note from the text block (it's misleading once the handoff delivers the image's content as text), while keeping the image block for kitty inline rendering and `/resume`.
 - **🔌 Provider-agnostic** — uses pi's own model execution machinery (`@earendil-works/pi-ai`'s `completeSimple()`), so it works with any provider/configured model, including custom provider extensions.
@@ -124,19 +124,19 @@ The log is append-only and size-capped (10 MB, rotating to `errors.log.1`), so a
 **With `pi install`** (recommended):
 
 ```bash
-pi install npm:pi-vision-handoff
+pi install npm:pi-vision-watcher
 ```
 
 Or install from GitHub:
 
 ```bash
-pi install https://github.com/monotykamary/pi-vision-handoff
+pi install https://github.com/bismawy/pi-vision-watcher
 ```
 
 **With npm**:
 
 ```bash
-npm install pi-vision-handoff
+npm install pi-vision-watcher
 ```
 
 Or in `~/.pi/agent/settings.json`:
@@ -144,7 +144,7 @@ Or in `~/.pi/agent/settings.json`:
 ```json
 {
   "packages": [
-    "npm:pi-vision-handoff"
+    "npm:pi-vision-watcher"
   ]
 }
 ```

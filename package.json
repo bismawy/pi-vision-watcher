@@ -1,10 +1,13 @@
 {
-  "name": "pi-vision-watcher",
+  "name": "@bismawy/pi-vision-watcher",
   "version": "1.0.7",
   "description": "Give text-only pi models vision — describe images with a vision model you pick via an interactive picker, then hand off the text description to non-vision models",
   "type": "module",
   "author": "bismawy",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bismawy/pi-vision-watcher.git"
@@ -15,6 +18,7 @@
   },
   "keywords": [
     "pi-package",
+    "pi-extension",
     "pi-vision-watcher",
     "pi-vision-handoff",
     "pi",

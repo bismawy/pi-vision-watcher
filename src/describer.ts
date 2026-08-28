@@ -60,7 +60,6 @@ import {
   type VisionHandoffUsageRecord,
 } from "./usage.js";
 import { imageHash } from "./image.js";
-import { randomUUID } from "node:crypto";
 import { abortWireGuard, fetchInterceptorGuard, timeoutGuard, type AbortWire } from "./dispose.js";
 
 /** Tokens reserved for the describer's input so the requested output budget
@@ -140,16 +139,20 @@ function isolateVisionRequest(
   model: Model<Api>,
   options: SimpleStreamOptions,
 ): SimpleStreamOptions {
-  const sessionId = `pi-vision-watcher:${randomUUID()}`;
+  // Stable per-model identity (not randomUUID): every describer call shares the
+  // same system prompt (DEFAULT_VISION_PROMPT), so a stable session id lets the
+  // provider's prompt cache reuse that prefix across calls (cacheRead/cacheWrite
+  // > 0) instead of re-billing it every turn. Still distinct from the main
+  // agent's conversation id (the inherited header we replace), so unrelated
+  // image prompts never become the main agent's newest cache lineage. A
+  // per-model id keeps different vision models (fallback chains) on separate
+  // lineages.
+  const sessionId = `pi-vision-watcher:${model.provider}:${model.id}`;
   const headers = { ...(options.headers ?? {}) };
   const inheritedConversationHeader = Object.keys(headers).find(
     (name) => name.toLowerCase() === NEURALWATT_CONVERSATION_HEADER,
   );
 
-  // Provider auth can carry the active Pi conversation id. A describer call is
-  // an independent conversation: reusing that id makes an unrelated image
-  // prompt the newest cache lineage for the main agent. Give every real vision
-  // request its own identity while preserving all non-session auth headers.
   if (inheritedConversationHeader) {
     headers[inheritedConversationHeader] = sessionId;
   } else if (model.provider.toLowerCase() === "neuralwatt") {
@@ -234,7 +237,7 @@ export async function runBatch(
   ];
   const userMessage: Message = { role: "user", content, timestamp: Date.now() };
 
-  const timeoutMs = describeTimeoutMs(misses.length);
+  const timeoutMs = describeTimeoutMs(misses.length, cfg.describeTimeoutMs);
   const maxTokens = resolveMaxTokens(cfg, visionModel);
   const reasoning = resolveReasoning(cfg, visionModel);
   const controller = new AbortController();
@@ -406,7 +409,7 @@ export async function describeSingle(
     { type: "image", data: img.data, mimeType: img.mimeType } satisfies ImageContent,
   ];
   const userMessage: Message = { role: "user", content, timestamp: Date.now() };
-  const timeoutMs = describeTimeoutMs(1);
+  const timeoutMs = describeTimeoutMs(1, cfg.describeTimeoutMs);
   const maxTokens = resolveMaxTokens(cfg, visionModel);
   const reasoning = resolveReasoning(cfg, visionModel);
   const controller = new AbortController();

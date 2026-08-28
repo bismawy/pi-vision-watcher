@@ -34,6 +34,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ModelRegi
 import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve } from "node:path";
 import {
+  DESCRIBE_TIMEOUT_MS,
   extractImageFromBlock,
   formatModelRef,
   isThinkingLevel,
@@ -735,7 +736,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("vision-watcher", {
     description: HANDOFF_COMMAND_DESCRIPTION,
     getArgumentCompletions(prefix: string) {
-      const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "fallback", "add", "remove", "clear", "help"];
+      const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "fallback", "timeout", "add", "remove", "clear", "help"];
       const matches = subcommands.filter((s) => s.startsWith(prefix));
       return matches.length > 0 ? matches.map((s) => ({ value: s, label: s })) : null;
     },
@@ -773,6 +774,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
         "                               Toggle describing pasted images at paste-time (opt-in, off by default)",
         "  /vision-watcher fallback <on|off>",
         "                               Inject pasted-image descriptions asynchronously when no matching read wins",
+        "  /vision-watcher timeout <ms>   Set the per-image description timeout (default 45000)",
         "  /vision-watcher add <p/id>     Force handoff for an extra model",
         "  /vision-watcher remove <p/id>  Stop forcing handoff for a model",
         "  /vision-watcher clear          Clear the configured vision model",
@@ -832,6 +834,11 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
 
   if (subcommand === "fallback") {
     handleFallbackSubcommand(ctx, rest);
+    return;
+  }
+
+  if (subcommand === "timeout") {
+    handleTimeoutSubcommand(ctx, rest);
     return;
   }
 
@@ -1010,6 +1017,35 @@ function handleFallbackSubcommand(ctx: ExtensionCommandContext, rest: string): v
   );
 }
 
+/** Handle `/vision-watcher timeout <ms>` — set the base per-image description
+ *  timeout (controls how long a slow vision model runs before failing over to
+ *  the configured fallback models). */
+function handleTimeoutSubcommand(ctx: ExtensionCommandContext, rest: string): void {
+  const arg = rest.trim();
+  if (!arg) {
+    ctx.ui.notify(
+      `Per-image description timeout: ${config.describeTimeoutMs} ms ` +
+        `(default ${DESCRIBE_TIMEOUT_MS} ms).\n` +
+        "Usage: /vision-watcher timeout <ms>",
+      "info",
+    );
+    return;
+  }
+  const ms = Number(arg);
+  if (!Number.isFinite(ms) || ms <= 0 || !Number.isInteger(ms)) {
+    ctx.ui.notify(
+      `Invalid timeout: "${arg}". Use a positive whole number of milliseconds (default ${DESCRIBE_TIMEOUT_MS}).`,
+      "error",
+    );
+    return;
+  }
+  updateConfig(
+    ctx,
+    (c) => ({ ...c, describeTimeoutMs: ms }),
+    `Per-image description timeout set to ${ms} ms.`,
+  );
+}
+
 async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) {
     ctx.ui.notify("/vision-watcher requires interactive mode.", "error");
@@ -1109,6 +1145,7 @@ function showStatus(ctx: ExtensionCommandContext): void {
   lines.push(`Thinking: ${config.thinking ? `on (${config.thinkingLevel})` : "off"}`);
   lines.push(`Paste-time prewarm: ${config.prewarmPastedImages ? `on${editorInstalled ? "" : " (inactive — another custom editor is active)"}` : "off"}`);
   lines.push(`Async pasted-path fallback: ${config.asyncClipboardHandoff ? "on" : "off"}`);
+  lines.push(`Timeout (per image): ${config.describeTimeoutMs} ms`);
   lines.push(`maxTokens: ${config.maxTokens ?? "unbounded"} · cacheMax: ${config.cacheMax} · maxDescriptionLines: ${config.maxDescriptionLines === 0 ? "unbounded" : config.maxDescriptionLines}`);
 
   const model = ctx.model;

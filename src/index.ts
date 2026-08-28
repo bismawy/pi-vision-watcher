@@ -78,19 +78,23 @@ export function isThinkingLevel(level: unknown): level is ThinkingLevel {
   return typeof level === "string" && (THINKING_LEVELS as readonly string[]).includes(level);
 }
 
-/** Per-description request timeout. Generous because the describer generates an
- *  exhaustive multi-paragraph description per image; a single image commonly
- *  takes ~20s, and a batched call over websocket transport scales with image
- *  count. {@link describeTimeoutMs} scales this per batch size. */
-export const DESCRIBE_TIMEOUT_MS = 120_000;
+/** Default per-image description timeout (ms). Kept modest so a slow vision
+ *  provider aborts early and fails over to {@link VisionHandoffConfig.fallbackModels}
+ *  instead of blocking the agent turn for minutes on a free-tier queue. A single
+ *  image commonly takes ~20s; raise via `describeTimeoutMs` in config only if
+ *  a specific model genuinely needs it. {@link describeTimeoutMs} scales this
+ *  per batch size. */
+export const DESCRIBE_TIMEOUT_MS = 45_000;
 
 /** Per-batch timeout: the base timeout plus a per-image budget so a 5-image
  *  batch isn't held to the same wall-clock budget as a single image. The
  *  describer generates exhaustive prose per image, and websocket transport
- *  adds latency, so the budget scales with the number of images in the call. */
-export function describeTimeoutMs(imageCount: number): number {
+ *  adds latency, so the budget scales with the number of images in the call.
+ *  `baseTimeout` defaults to {@link DESCRIBE_TIMEOUT_MS} and is overridden by
+ *  the configured `describeTimeoutMs` field. */
+export function describeTimeoutMs(imageCount: number, baseTimeout: number = DESCRIBE_TIMEOUT_MS): number {
   const perImage = 45_000;
-  return DESCRIBE_TIMEOUT_MS + Math.max(0, imageCount - 1) * perImage;
+  return baseTimeout + Math.max(0, imageCount - 1) * perImage;
 }
 
 /**
@@ -168,6 +172,12 @@ export interface VisionHandoffConfig {
    *  A truncation is always surfaced via {@link DESCRIPTION_TRUNCATED_MARKER}
    *  when the model hits the limit. */
   maxTokens?: number;
+  /** Base per-image description timeout in ms (defaults to
+   *  {@link DESCRIBE_TIMEOUT_MS}). The per-batch timeout scales from this base
+   *  by image count. Lower it to fail over to {@link fallbackModels} sooner on a
+   *  slow primary; raise it for a high-latency vision model that times out
+   *  spuriously. */
+  describeTimeoutMs: number;
   /** Max images kept in the in-memory description cache. */
   cacheMax: number;
   /**
@@ -201,6 +211,7 @@ export const DEFAULT_CONFIG: VisionHandoffConfig = {
   prewarmPastedImages: false,
   asyncClipboardHandoff: false,
   maxTokens: undefined,
+  describeTimeoutMs: DESCRIBE_TIMEOUT_MS,
   cacheMax: DEFAULT_CACHE_MAX,
   maxDescriptionLines: DEFAULT_MAX_DESCRIPTION_LINES,
   thinking: false,
@@ -263,6 +274,13 @@ export function normalizeConfig(raw: unknown): VisionHandoffConfig {
   // a valid positive finite number is given; any other value leaves it unset.
   if (typeof obj.maxTokens === "number" && Number.isFinite(obj.maxTokens) && obj.maxTokens > 0) {
     base.maxTokens = Math.floor(obj.maxTokens);
+  }
+  if (
+    typeof obj.describeTimeoutMs === "number" &&
+    Number.isFinite(obj.describeTimeoutMs) &&
+    obj.describeTimeoutMs > 0
+  ) {
+    base.describeTimeoutMs = Math.floor(obj.describeTimeoutMs);
   }
   if (typeof obj.cacheMax === "number" && Number.isFinite(obj.cacheMax) && obj.cacheMax > 0) {
     base.cacheMax = Math.floor(obj.cacheMax);

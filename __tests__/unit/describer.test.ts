@@ -76,6 +76,7 @@ const cfg: VisionHandoffConfig = {
   prewarmPastedImages: false,
   asyncClipboardHandoff: false,
   maxTokens: undefined,
+  describeTimeoutMs: 45_000,
   cacheMax: 50,
   maxDescriptionLines: 0,
   thinking: false,
@@ -219,7 +220,7 @@ describe("provider routing", () => {
       headers: Record<string, string>;
     };
     expect(options).toMatchObject({ apiKey: "k", maxTokens: 4096 });
-    expect(options.sessionId).toMatch(/^pi-vision-watcher:[0-9a-f-]{36}$/);
+    expect(options.sessionId).toBe("pi-vision-watcher:p:id");
     expect(options.headers).toEqual({
       "X-NW-Conversation-ID": options.sessionId,
       "X-Custom-Auth": "preserved",
@@ -258,9 +259,7 @@ describe("provider routing", () => {
 
     expect(out).toBe("built-in description");
     expect(completeSimple).toHaveBeenCalledTimes(1);
-    expect(completeSimple.mock.calls[0][2].sessionId).toMatch(
-      /^pi-vision-watcher:[0-9a-f-]{36}$/,
-    );
+    expect(completeSimple.mock.calls[0][2].sessionId).toBe("pi-vision-watcher:p:id");
   });
 });
 
@@ -306,6 +305,7 @@ describe("resolveMaxTokens", () => {
     prewarmPastedImages: false,
     asyncClipboardHandoff: false,
     maxTokens: undefined,
+    describeTimeoutMs: 45_000,
     cacheMax: 50,
     maxDescriptionLines: 0,
     thinking: false,

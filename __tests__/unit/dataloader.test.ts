@@ -35,6 +35,7 @@ function makeLoader(
     prewarmPastedImages: false,
     asyncClipboardHandoff: false,
     maxTokens: undefined,
+    describeTimeoutMs: 45_000,
     cacheMax: 50,
     maxDescriptionLines: 0,
     thinking: false,

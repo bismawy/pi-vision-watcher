@@ -31,17 +31,24 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, resizeImage } from "@earendil-works/pi-coding-agent";
 import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   DESCRIBE_TIMEOUT_MS,
   extractImageFromBlock,
   formatModelRef,
   isThinkingLevel,
+  assistantErrorText,
+  isImageNotSupportedError,
+  isKnownTextOnlyFalselyVision,
   isVisionModel,
   NON_VISION_IMAGE_NOTE,
   parseModelRef,
   readConfig,
+  setTextOnlyInputOverride,
   stripNonVisionImageNote,
   writeConfig,
   HANDOFF_COMMAND_DESCRIPTION,
@@ -56,7 +63,6 @@ import {
 import { DescriptionLoader, UNAVAILABLE, type LoaderDeps } from "./src/dataloader.js";
 import { imageHash, findPastedImagePaths, readImageBuffer, readImageBufferBounded, resolvePrewarmImage, isOmittedImageNote } from "./src/image.js";
 import { appendVisionError } from "./src/error-log.js";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
 import { VisionModelSelectorComponent, type VisionModelSelectorResult } from "./src/vision-model-selector.js";
 import { PrewarmEditor } from "./src/prewarm-editor.js";
 import { Text } from "@earendil-works/pi-tui";
@@ -238,6 +244,10 @@ function isHandoffTarget(
   if (!model || !model.provider || !model.id) return false;
   const ref = formatModelRef(model.provider, model.id);
   if (cfg.handoffModels.includes(ref)) return true;
+  // Aggregators often mark DeepSeek V4 as vision; the backend 400s on images.
+  // Treat as text-only so the FIRST send is handed off — waiting for the 400
+  // is too late. Persist the models.json override separately so /model agrees.
+  if (cfg.autoHandoff && isKnownTextOnlyFalselyVision(model.id)) return true;
   if (cfg.autoHandoff && !isVisionModel(model)) return true;
   return false;
 }
@@ -301,6 +311,46 @@ function installPrewarmEditor(ctx: ExtensionContext): void {
       prewarmPath: prewarmClipboardPath,
     }),
   );
+}
+
+/** Write a `modelOverrides.<modelId>.input = ["text"]` fix to models.json and
+ *  refresh the registry in-process so it applies without /reload (the same
+ *  write+refresh pattern pi-auto-compat uses). Never touches credentials or
+ *  other fields — the merge is done by the pure {@link setTextOnlyInputOverride}.
+ *  Returns true when the override was written; false when models.json is
+ *  unreadable/corrupt or the write fails (callers fall back to handoffModels). */
+function fixModelInputTextOnly(ctx: ExtensionContext, providerId: string, modelId: string): boolean {
+  const path = join(getAgentDir(), "models.json");
+  let cfg: unknown;
+  try {
+    cfg = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  } catch {
+    return false;
+  }
+  try {
+    writeFileSync(path, JSON.stringify(setTextOnlyInputOverride(cfg, providerId, modelId), null, 2) + "\n", "utf8");
+  } catch {
+    return false;
+  }
+  // Refresh the merged registry in-process so the corrected input takes
+  // effect this session. Fire-and-forget: a refresh failure only delays the
+  // fix to the next session start (models.json is already corrected on disk).
+  void ctx.modelRegistry
+    ?.refresh?.({ allowNetwork: false })
+    ?.catch?.(() => {});
+  return true;
+}
+
+/** Persist `input: ["text"]` for a model that falsely declares image input.
+ *  No-op if the model is already text-only or isn't a known false-vision id. */
+function persistFalseVisionOverride(
+  ctx: ExtensionContext,
+  model: { provider?: string; id?: string; input?: ("text" | "image")[] } | undefined | null,
+): boolean {
+  if (!model?.provider || !model.id) return false;
+  if (!isKnownTextOnlyFalselyVision(model.id)) return false;
+  if (!isVisionModel(model)) return false;
+  return fixModelInputTextOnly(ctx, model.provider, model.id);
 }
 
 function notifyUnresolvedVisionModel(ctx: ExtensionContext, ref: string): void {
@@ -401,6 +451,7 @@ export default function (pi: ExtensionAPI) {
     warnedHashes.clear();
     loader.reset();
     currentModel = ctx.model;
+    persistFalseVisionOverride(ctx, ctx.model);
     installPrewarmEditor(ctx);
   });
 
@@ -719,13 +770,69 @@ export default function (pi: ExtensionAPI) {
     if (changed) return { messages: event.messages };
   });
 
+  // Auto-recovery from "model does not support image" 400s: a model whose
+  // registry entry falsely declares `input: ["text","image"]` (common on
+  // aggregator providers) passes the autoHandoff vision check, so handoff is
+  // skipped and the raw image block reaches the provider — which rejects it.
+  // PRIMARY fix: correct the metadata at its layer — write a `modelOverrides`
+  // entry forcing `input: ["text"]` to models.json and refresh the registry
+  // in-process (modelOverrides is Pi's topmost config layer, so it wins even
+  // over a regenerated models[] entry). The model then registers as text-only,
+  // autoHandoff covers it naturally, and /model shows it correctly. FALLBACK
+  // (write failed): force handoff via handoffModels. Either way, the failed
+  // turn's images are still in history; the context hook describes them on the
+  // retry instead of failing again.
+  pi.on("message_end", (event, ctx) => {
+    const msg = event.message as {
+      role?: string;
+      type?: string;
+      stopReason?: string;
+      errorMessage?: unknown;
+      content?: unknown;
+    };
+    // Pi assistant messages use `role`, not `type`. Checking `type` made this
+    // handler a no-op, so the 400 never taught us anything.
+    if (msg?.role !== "assistant" && msg?.type !== "assistant") return;
+    if (msg.stopReason !== "error") return;
+    if (!isImageNotSupportedError(assistantErrorText(msg))) return;
+    if (!isConfigured(config)) return;
+    const model = ctx.model;
+    if (!model?.provider || !model.id) return;
+    const ref = formatModelRef(model.provider, model.id);
+
+    const fixed = persistFalseVisionOverride(ctx, model) || fixModelInputTextOnly(ctx, model.provider, model.id);
+    if (fixed) {
+      if (!config.handoffModels.includes(ref)) {
+        config = { ...config, handoffModels: [...config.handoffModels, ref] };
+        writeConfig(config);
+      }
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `pi-vision-watcher: ${ref} rejected image input — marked as text-only. Resend; images will be described by ${config.visionModel}.`,
+          "warning",
+        );
+      }
+      return;
+    }
+
+    if (config.handoffModels.includes(ref)) return;
+    config = { ...config, handoffModels: [...config.handoffModels, ref] };
+    writeConfig(config);
+    if (!ctx.hasUI) return;
+    ctx.ui.notify(
+      `pi-vision-watcher: ${ref} rejected image input — handoff forced for this model. Resend; images will be described by ${config.visionModel}.`,
+      "warning",
+    );
+  });
+
   pi.on("model_select", (event, ctx) => {
     currentModel = event.model;
+    persistFalseVisionOverride(ctx, event.model);
     if (!ctx.hasUI) return;
     if (!isConfigured(config)) return;
     const model = event.model;
     if (!model) return;
-    if (isHandoffTarget(model, config) && !isVisionModel(model)) {
+    if (isHandoffTarget(model, config)) {
       ctx.ui.notify(
         `pi-vision-watcher: active — images will be described by ${config.visionModel}`,
         "info",

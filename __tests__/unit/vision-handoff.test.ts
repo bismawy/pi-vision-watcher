@@ -10,6 +10,10 @@ import {
   formatModelRef,
   getConfigPath,
   insertImageDescriptions,
+  assistantErrorText,
+  isImageNotSupportedError,
+  isKnownTextOnlyFalselyVision,
+  setTextOnlyInputOverride,
   isVisionModel,
   makeReplacementText,
   markDescriptionTruncated,
@@ -650,5 +654,101 @@ describe("insertImageDescriptions with a batched (pre-resolved) describe callbac
       { type: "text", text: "[Image: desc B]" },
       imgB,
     ]);
+  });
+});
+
+describe("isKnownTextOnlyFalselyVision", () => {
+  it("matches aggregator DeepSeek V4 ids", () => {
+    expect(isKnownTextOnlyFalselyVision("deepseek-v4-flash:free")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("deepseek-ai/DeepSeek-V4-Pro-0813")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("DeepSeek-V4-Flash-0731")).toBe(true);
+  });
+
+  it("does not match VL/vision variants or unrelated models", () => {
+    expect(isKnownTextOnlyFalselyVision("deepseek-vl2")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("deepseek-v4-vision")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("janus-pro")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("gemini-3.7-flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("")).toBe(false);
+  });
+});
+
+describe("assistantErrorText", () => {
+  it("prefers errorMessage, then text content blocks", () => {
+    expect(assistantErrorText({ errorMessage: "does not support image" })).toBe("does not support image");
+    expect(
+      assistantErrorText({
+        content: [{ type: "text", text: "400: This model does not support image" }],
+      }),
+    ).toBe("400: This model does not support image");
+    expect(assistantErrorText({} as { errorMessage?: string })).toBe("");
+  });
+});
+
+describe("isImageNotSupportedError", () => {
+  it("matches provider image-rejection errors across wording variants", () => {
+    expect(
+      isImageNotSupportedError(
+        '400: {"message":"This model does not support image [trace_id=5219e6f67ddf89e72619a762d3e82840]","type":"invalid_request_error"}',
+      ),
+    ).toBe(true);
+    expect(isImageNotSupportedError("Model does not support image inputs")).toBe(true);
+    expect(isImageNotSupportedError("images are not supported for this model")).toBe(true);
+    expect(isImageNotSupportedError("Unsupported image content")).toBe(true);
+  });
+
+  it("does not match unrelated errors", () => {
+    expect(isImageNotSupportedError("rate limit exceeded")).toBe(false);
+    expect(isImageNotSupportedError("invalid api key")).toBe(false);
+    expect(isImageNotSupportedError("")).toBe(false);
+    // must not match e.g. "prompt does not support tool use"
+    expect(isImageNotSupportedError("This endpoint does not support streaming")).toBe(false);
+  });
+});
+
+describe("setTextOnlyInputOverride", () => {
+  it("adds an input override without touching credentials or siblings", () => {
+    const cfg = {
+      providers: {
+        tokenharbor: {
+          apiKey: "sk-secret",
+          models: [{ id: "deepseek-v4-flash:free", input: ["text", "image"] }],
+          modelOverrides: { "other-model": { compat: { supportsLongCacheRetention: true } } },
+        },
+      },
+    };
+    const out = setTextOnlyInputOverride(cfg, "tokenharbor", "deepseek-v4-flash:free") as any;
+    expect(out.providers.tokenharbor.apiKey).toBe("sk-secret"); // credentials preserved
+    expect(out.providers.tokenharbor.models).toEqual(cfg.providers.tokenharbor.models); // untouched
+    expect(out.providers.tokenharbor.modelOverrides["other-model"]).toEqual({
+      compat: { supportsLongCacheRetention: true },
+    }); // sibling override preserved
+    expect((out.providers.tokenharbor.modelOverrides as Record<string, any>)["deepseek-v4-flash:free"].input).toEqual(["text"]);
+    // input object not mutated
+    expect((cfg.providers.tokenharbor.modelOverrides as Record<string, any>)["deepseek-v4-flash:free"]).toBeUndefined();
+  });
+
+  it("merges into an existing override for the same model", () => {
+    const cfg = {
+      providers: {
+        p: { modelOverrides: { m: { compat: { thinkingFormat: "deepseek" } } } },
+      },
+    };
+    const out = setTextOnlyInputOverride(cfg, "p", "m") as any;
+    expect(out.providers.p.modelOverrides.m).toEqual({
+      compat: { thinkingFormat: "deepseek" },
+      input: ["text"],
+    });
+  });
+
+  it("creates missing provider/override structures from scratch", () => {
+    const out = setTextOnlyInputOverride({}, "newprov", "some-model") as any;
+    expect(out.providers.newprov.modelOverrides["some-model"].input).toEqual(["text"]);
+  });
+
+  it("tolerates corrupt/non-object config shapes", () => {
+    const out = setTextOnlyInputOverride("garbage", "p", "m") as any;
+    expect(out.providers.p.modelOverrides.m.input).toEqual(["text"]);
+    expect(setTextOnlyInputOverride(null, "p", "m")).toBeTruthy();
   });
 });

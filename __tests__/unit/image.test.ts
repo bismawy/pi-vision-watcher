@@ -370,19 +370,19 @@ describe("findPastedImagePaths", () => {
   const tmp = tmpdir();
 
   it("collects pi-clipboard temp paths inside the OS temp dir", () => {
-    const a = tmp + "/pi-clipboard-abc-1.png";
-    const b = tmp + "/pi-clipboard-def-2.jpg";
+    const a = join(tmp, "pi-clipboard-abc-1.png");
+    const b = join(tmp, "pi-clipboard-def-2.jpg");
     expect(findPastedImagePaths("Look at " + a + " and " + b + " please").sort()).toEqual([a, b].sort());
   });
 
   it("collects localterm-paste temp paths (not just pi-clipboard)", () => {
-    const p = tmp + "/localterm-paste/abc-123/pasted-1784890583347-3c6a26f2.png";
+    const p = join(tmp, "localterm-paste", "abc-123", "pasted-1784890583347-3c6a26f2.png");
     expect(findPastedImagePaths("describe " + p)).toEqual([p]);
   });
 
   it("collects any temp-dir image path regardless of filename prefix", () => {
-    const a = tmp + "/screenshot-2026.png";
-    const b = tmp + "/nested/dir/chart.gif";
+    const a = join(tmp, "screenshot-2026.png");
+    const b = join(tmp, "nested", "dir", "chart.gif");
     expect(findPastedImagePaths("see " + a + " and " + b).sort()).toEqual([a, b].sort());
   });
 
@@ -396,7 +396,7 @@ describe("findPastedImagePaths", () => {
   });
 
   it("strips leading wrapping chars so parenthesized/markdown paths resolve", () => {
-    const p = tmp + "/pi-clipboard-wrap.png";
+    const p = join(tmp, "pi-clipboard-wrap.png");
     expect(findPastedImagePaths("see (" + p + ")")).toEqual([p]);
     expect(findPastedImagePaths("![](" + p + ")")).toEqual([p]);
   });
@@ -408,13 +408,13 @@ describe("findPastedImagePaths", () => {
   });
 
   it("dedupes repeated paths", () => {
-    const a = tmp + "/pi-clipboard-dup.png";
+    const a = join(tmp, "pi-clipboard-dup.png");
     expect(findPastedImagePaths(a + " " + a)).toEqual([a]);
   });
 
   it("supports webp and jpeg extensions", () => {
-    const a = tmp + "/pi-clipboard-a.webp";
-    const b = tmp + "/pi-clipboard-b.jpeg";
+    const a = join(tmp, "pi-clipboard-a.webp");
+    const b = join(tmp, "pi-clipboard-b.jpeg");
     expect(findPastedImagePaths(a + " " + b).sort()).toEqual([a, b].sort());
   });
 });
@@ -425,13 +425,13 @@ describe("diffPrewarmPaths", () => {
   const tmp = tmpdir();
 
   it("returns paths not already in known", () => {
-    const a = `${tmp}/pi-clipboard-a.png`;
-    const b = `${tmp}/pi-clipboard-b.png`;
+    const a = join(tmp, "pi-clipboard-a.png");
+    const b = join(tmp, "pi-clipboard-b.png");
     expect(diffPrewarmPaths(`${a} ${b}`, new Set([a]))).toEqual([b]);
   });
 
   it("returns [] when every path is already known", () => {
-    const a = `${tmp}/pi-clipboard-a.png`;
+    const a = join(tmp, "pi-clipboard-a.png");
     expect(diffPrewarmPaths(a, new Set([a]))).toEqual([]);
   });
 
@@ -441,13 +441,13 @@ describe("diffPrewarmPaths", () => {
   });
 
   it("dedupes within the text (a repeated new path is returned once)", () => {
-    const a = `${tmp}/pi-clipboard-a.png`;
+    const a = join(tmp, "pi-clipboard-a.png");
     expect(diffPrewarmPaths(`${a} ${a}`, new Set())).toEqual([a]);
   });
 
   it("only reports genuinely new paths across multiple text changes", () => {
-    const a = `${tmp}/pi-clipboard-a.png`;
-    const b = `${tmp}/pi-clipboard-b.png`;
+    const a = join(tmp, "pi-clipboard-a.png");
+    const b = join(tmp, "pi-clipboard-b.png");
     const known = new Set<string>();
     // first change: both new
     expect(diffPrewarmPaths(`${a} ${b}`, known)).toEqual([a, b].sort());

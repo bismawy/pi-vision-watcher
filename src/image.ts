@@ -20,7 +20,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import crypto from "node:crypto";
 import type { ExtractedImage } from "./index.js";
 
@@ -299,14 +299,14 @@ const LEADING_WRAP_RE = new RegExp('^[^A-Za-z0-9_/@.~-]+');
  *  dir and mistaken for local files; leading wrapping chars (parentheses,
  *  quotes) are stripped so quoted/parenthesized paths still resolve. */
 export function findPastedImagePaths(prompt: string): string[] {
-  const tmp = tmpdir();
+  const tmp = normalize(tmpdir());
   const paths = new Set<string>();
   for (const m of prompt.matchAll(PASTED_IMAGE_PATH_RE)) {
     const token = m[1];
     if (!token) continue;
     if (URL_RE.test(token)) continue;
     const p = token.replace(LEADING_WRAP_RE, "");
-    const abs = isAbsolute(p) ? p : join(tmp, p);
+    const abs = normalize(isAbsolute(p) ? p : join(tmp, p));
     // Ensure the resolved candidate stays inside the temp directory.
     if (abs.startsWith(tmp + sep) || abs === tmp) paths.add(abs);
   }

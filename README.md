@@ -8,7 +8,7 @@ Seamlessly inspect, describe, and convert visual inputs (screenshots, mockups, t
 [![npm](https://img.shields.io/npm/v/@bismawy/pi-vision-watcher)](https://www.npmjs.com/package/@bismawy/pi-vision-watcher)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-![pi-vision-watcher](./assets/screenshot.webp)
+![pi-vision-watcher](./assets/screenshot.png)
 
 ---
 

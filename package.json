@@ -57,7 +57,7 @@
     "extensions": [
       "./vision-watcher.ts"
     ],
-    "image": "https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/screenshot.webp"
+    "image": "https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/screenshot.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

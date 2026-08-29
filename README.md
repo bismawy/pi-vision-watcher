@@ -12,7 +12,7 @@ Describe images using an authenticated vision model of your choice, then seamles
 
 ## The Problem
 
-Some of the best coding models are text-only. When you attach a screenshot, diagram, or UI mock, they either ignore it or fail the request entirely. Switching models just to read an image interrupts your workflow.
+Some of the best coding models are text-only. When you attach a screenshot, diagram, or UI mock, they either ignore it or fail the request entirely (often returning `400: This model does not support image`). Switching models just to read an image interrupts your workflow.
 
 ## The Solution
 
@@ -20,6 +20,7 @@ Some of the best coding models are text-only. When you attach a screenshot, diag
 - **Interactive Picker:** Pick any vision model from your authenticated providers with `/vision-watcher`.
 - **Automatic Handoff:** Whenever a non-vision model receives an image (via paste, attachment, or the `read` tool), the image is described behind the scenes and swapped for rich descriptive text before reaching the model.
 - **Batched & Cached:** Uses a DataLoader pattern so multiple images in a turn coalesce into a **single batched vision request**, cached by SHA-256 hash.
+- **Smart False-Vision Handling:** Handles aggregator models (like DeepSeek V4) that falsely declare multimodal inputs in their registry but reject raw images in reality.
 
 ---
 
@@ -27,10 +28,11 @@ Some of the best coding models are text-only. When you attach a screenshot, diag
 
 - 🎯 **Connected-Only Model Picker** — `/vision-watcher` filters out unconfigured providers, showing only models you actually have credentials for (`/login`, `models.json`, or environment variables). Vision-capable models are highlighted with 👁️.
 - ⚡ **DataLoader Batching** — Multiple images from parallel `read` calls or multi-image attachments merge into ONE batched vision call during the tool-result phase, eliminating latency bottlenecks.
+- 🛡️ **Auto-Recovery & Proactive False-Vision Handling** — Aggregator proxies often falsely mark text-only models (such as DeepSeek V4) as vision-capable, leading to HTTP 400 errors (`This model does not support image`). `pi-vision-watcher` proactively forces handoff on the first send for known false-vision models and auto-heals `models.json` `modelOverrides` if a provider rejects image payloads.
 - 🧠 **Thinking & Reasoning Support** — Configure reasoning effort (`/vision-watcher thinking <level>`) for reasoning-capable vision models (e.g. OpenAI o-series, Claude, DeepSeek).
 - 🔄 **Fallback Chains** — Specify backup vision models that automatically take over if your primary describer is unavailable or encounters rate limits.
-- 🚀 **Paste-Time Prewarm (Opt-in)** — Describe pasted images the moment the path lands in the prompt editor before you even press Enter.
-- 📬 **Async Clipboard Fallback (Opt-in)** — Races direct reads against asynchronous description delivery to prevent stalling.
+- ⚡ **Paste-Time Prewarm (Opt-in)** — Describe pasted images the moment the path lands in the prompt editor before you even press Enter.
+- 🚀 **Async Clipboard Fallback (Opt-in)** — Races direct reads against asynchronous description delivery to prevent stalling.
 - 💾 **LRU Hash Caching** — Prevents duplicate calls for identical images across conversation turns.
 - 🛡️ **Graceful Degradation** — Never crashes your agent turn. If a description fails, a clean `[Image: description unavailable]` placeholder is provided and logged to `~/.pi/agent/logs/pi-vision-watcher/errors.log`.
 
@@ -52,7 +54,7 @@ Then run `/reload` in Pi (or restart Pi).
 
 ---
 
-## 🎮 Usage
+## 🕹️ Usage
 
 ### Interactive Commands
 
@@ -116,6 +118,7 @@ Configuration is stored at `~/.pi/agent/extensions/pi-vision-watcher.json`:
 ## 🔍 Troubleshooting & Logs
 
 - **Error Logs:** Detailed failure traces, timestamps, and config snapshots are recorded in `~/.pi/agent/logs/pi-vision-watcher/errors.log`.
+- **False-Vision Recovery:** If a model rejects image payloads with an HTTP 400 error, `pi-vision-watcher` automatically patches `models.json` `modelOverrides` to set `input: ["text"]` and reloads the registry in-process, preventing recurrent failures.
 - **Transient Retries:** Failed descriptions are never cached permanently — the next turn automatically re-attempts description generation.
 
 ---
@@ -123,9 +126,9 @@ Configuration is stored at `~/.pi/agent/extensions/pi-vision-watcher.json`:
 ## 🛠️ Development
 
 ```bash
-pnpm install
-pnpm test          # Run Vitest unit tests
-pnpm typecheck     # Run TypeScript type check
+bun install
+bun run test          # Run Vitest unit tests
+bun run typecheck     # Run TypeScript type check
 ```
 
 ---
@@ -136,6 +139,7 @@ pnpm typecheck     # Run TypeScript type check
 
 **Key Enhancements:**
 - Filters picker to only authenticated/connected models.
+- Added proactive handling and auto-recovery for false-vision models (e.g. aggregator DeepSeek V4).
 - Added thinking & reasoning controls for modern reasoning vision models.
 - Multi-model fallback chain support.
 - Streamlined settings and UI badging.

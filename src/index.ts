@@ -235,6 +235,84 @@ export function formatModelRef(provider: string, id: string): string {
   return `${provider}/${id}`;
 }
 
+/** Match provider errors meaning "this model can't take image input" — e.g.
+ *  AgentRouter's 400 `"This model does not support image"`, OpenRouter's
+ *  "does not support image inputs". Used by the message_end auto-recovery:
+ *  a model whose registry entry FALSELY declares `input: ["text","image"]`
+ *  passes the autoHandoff vision check, so the raw image reaches the provider
+ *  and 400s — we learn from that error and force handoff for the model. */
+export function isImageNotSupportedError(text: string): boolean {
+  return /not support (?:the )?image|image[s]? (?:input[s]? )?(?:is |are )?not supported|does not accept image|unsupported (?:image|multimodal)/i.test(
+    text,
+  );
+}
+
+/** Models whose registry entries commonly declare image input while the
+ *  backend rejects images (DeepSeek V4 via aggregator proxies). Conservative:
+ *  VL / Vision / Janus variants keep image input. Used so autoHandoff covers
+ *  them on the FIRST send — waiting for a 400 is too late. */
+export function isKnownTextOnlyFalselyVision(id: string | undefined | null): boolean {
+  if (!id) return false;
+  const n = id.toLowerCase();
+  if (n.includes("vl") || n.includes("vision") || n.includes("janus")) return false;
+  return /deepseek[-_./]*v4/.test(n);
+}
+
+/** Extract the provider error string from a finalized assistant message.
+ *  Pi stores it on `errorMessage`; some providers also put the 400 body in a
+ *  text content block. */
+export function assistantErrorText(msg: {
+  errorMessage?: unknown;
+  content?: unknown;
+} | null | undefined): string {
+  if (!msg) return "";
+  if (typeof msg.errorMessage === "string" && msg.errorMessage) return msg.errorMessage;
+  if (typeof msg.content === "string") return msg.content;
+  if (!Array.isArray(msg.content)) return "";
+  return msg.content
+    .filter((b): b is { type: string; text: string } => !!b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string")
+    .map((b) => b.text)
+    .join("\n");
+}
+
+/** Set (or add) a `modelOverrides` entry forcing a model's input to
+ *  `["text"]` in a PARSED models.json config object. Pure: returns a new
+ *  object, never mutates the input. Preserves every other field (credentials,
+ * compat, sibling models) — only the one model's `input` override is touched.
+ *  Used by the message_end auto-recovery to fix models whose registry entry
+ *  falsely declares image input the backend rejects with a 400. */
+export function setTextOnlyInputOverride(
+  cfg: unknown,
+  providerId: string,
+  modelId: string,
+): Record<string, unknown> {
+  const root =
+    cfg && typeof cfg === "object" && !Array.isArray(cfg)
+      ? { ...(cfg as Record<string, unknown>) }
+      : {};
+  const providers =
+    root.providers && typeof root.providers === "object" && !Array.isArray(root.providers)
+      ? { ...(root.providers as Record<string, unknown>) }
+      : {};
+  const provider =
+    providers[providerId] && typeof providers[providerId] === "object" && !Array.isArray(providers[providerId])
+      ? { ...(providers[providerId] as Record<string, unknown>) }
+      : {};
+  const overrides =
+    provider.modelOverrides && typeof provider.modelOverrides === "object" && !Array.isArray(provider.modelOverrides)
+      ? { ...(provider.modelOverrides as Record<string, unknown>) }
+      : {};
+  const existing =
+    overrides[modelId] && typeof overrides[modelId] === "object" && !Array.isArray(overrides[modelId])
+      ? { ...(overrides[modelId] as Record<string, unknown>) }
+      : {};
+  overrides[modelId] = { ...existing, input: ["text"] };
+  provider.modelOverrides = overrides;
+  providers[providerId] = provider;
+  root.providers = providers;
+  return root;
+}
+
 /** Whether a model declares image input. */
 export function isVisionModel(model: { input?: ("text" | "image")[] } | undefined | null): boolean {
   return !!model && Array.isArray(model.input) && model.input.includes("image");

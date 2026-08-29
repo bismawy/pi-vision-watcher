@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { resolve } from "node:path";
 
 // Mock the describer so no provider call is made; the loader wraps the canned
 // descriptions with [Image: …] exactly as in production.
@@ -456,7 +457,7 @@ describe("omitted-image recovery (read emitted [Image omitted], no image block)"
       },
       { ...ctxWithSignal(), cwd: "/working/dir" },
     );
-    expect(readImageBufferBoundedMock).toHaveBeenCalledWith("/working/dir/rel/x.png");
+    expect(readImageBufferBoundedMock).toHaveBeenCalledWith(resolve("/working/dir", "rel/x.png"));
   });
 
   it("leaves the omitted note when the file can't be re-read (no path)", async () => {

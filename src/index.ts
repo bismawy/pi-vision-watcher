@@ -242,20 +242,24 @@ export function formatModelRef(provider: string, id: string): string {
  *  passes the autoHandoff vision check, so the raw image reaches the provider
  *  and 400s — we learn from that error and force handoff for the model. */
 export function isImageNotSupportedError(text: string): boolean {
-  return /not support (?:the )?image|image[s]? (?:input[s]? )?(?:is |are )?not supported|does not accept image|unsupported (?:image|multimodal)/i.test(
+  return /not support (?:the )?image|image[s]? (?:input[s]? )?(?:is |are )?not supported|does not accept image|unsupported (?:image|multimodal)|only (?:supports|accepts) text|unsupported content type[\s\S]{0,40}image/i.test(
     text,
   );
 }
 
 /** Models whose registry entries commonly declare image input while the
- *  backend rejects images (DeepSeek V4 via aggregator proxies). Conservative:
- *  VL / Vision / Janus variants keep image input. Used so autoHandoff covers
- *  them on the FIRST send — waiting for a 400 is too late. */
+ *  backend rejects images (DeepSeek V4, GLM 4/5 non-V via aggregator
+ *  proxies). Conservative: VL / Vision / Janus / *V variants keep image
+ *  input. Used so autoHandoff covers them on the FIRST send — waiting for a
+ *  400 is too late. */
 export function isKnownTextOnlyFalselyVision(id: string | undefined | null): boolean {
   if (!id) return false;
   const n = id.toLowerCase();
   if (n.includes("vl") || n.includes("vision") || n.includes("janus")) return false;
-  return /deepseek[-_./]*v4/.test(n);
+  if (/\dv(?=[-_./\s]|$)/.test(n)) return false; // glm-4v, glm-4.5v — vision variants
+  if (/deepseek[-_./]*v4/.test(n)) return true;
+  if (/glm[-_./]*[45]/.test(n)) return true;
+  return false;
 }
 
 /** Extract the provider error string from a finalized assistant message.

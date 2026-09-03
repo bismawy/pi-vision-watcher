@@ -664,11 +664,22 @@ describe("isKnownTextOnlyFalselyVision", () => {
     expect(isKnownTextOnlyFalselyVision("DeepSeek-V4-Flash-0731")).toBe(true);
   });
 
+  it("matches aggregator GLM 4/5 non-V ids", () => {
+    expect(isKnownTextOnlyFalselyVision("glm-5.3")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("glm-5.2")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("z-ai/glm-5.3-free")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("glm-4.6")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("glm-5p3-flash-baseten")).toBe(true);
+  });
+
   it("does not match VL/vision variants or unrelated models", () => {
     expect(isKnownTextOnlyFalselyVision("deepseek-vl2")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("deepseek-v4-vision")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("janus-pro")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("gemini-3.7-flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("glm-4v")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("glm-4.5v")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("glm-4.5v-flash")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("")).toBe(false);
   });
 });
@@ -695,6 +706,12 @@ describe("isImageNotSupportedError", () => {
     expect(isImageNotSupportedError("Model does not support image inputs")).toBe(true);
     expect(isImageNotSupportedError("images are not supported for this model")).toBe(true);
     expect(isImageNotSupportedError("Unsupported image content")).toBe(true);
+    expect(
+      isImageNotSupportedError(
+        '400: {"message":"Model only supports text input; received unsupported content type \'image_url\'.","type":"bad_response_status_code"}',
+      ),
+    ).toBe(true);
+    expect(isImageNotSupportedError("Model only accepts text")).toBe(true);
   });
 
   it("does not match unrelated errors", () => {

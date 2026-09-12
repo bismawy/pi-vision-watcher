@@ -5,17 +5,17 @@ import { join } from "node:path";
 
 import {
   DEFAULT_CONFIG,
+  DESCRIBE_TIMEOUT_MS,
   DESCRIPTION_TRUNCATED_MARKER,
+  describeTimeoutMs,
   extractImageFromBlock,
   formatModelRef,
   getConfigPath,
-  insertImageDescriptions,
   assistantErrorText,
   isImageNotSupportedError,
   isKnownTextOnlyFalselyVision,
   setTextOnlyInputOverride,
   isVisionModel,
-  makeReplacementText,
   markDescriptionTruncated,
   NON_VISION_IMAGE_NOTE,
   normalizeConfig,
@@ -31,7 +31,15 @@ import {
   BATCH_IMAGE_MARKER_END,
   type VisionHandoffConfig,
 } from "../../src/index.js";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+
+describe("describeTimeoutMs", () => {
+  it("scales with image count and with the configured base, so lowering the base fails over sooner for the whole batch", () => {
+    expect(describeTimeoutMs(1)).toBe(DESCRIBE_TIMEOUT_MS);
+    expect(describeTimeoutMs(3)).toBe(3 * DESCRIBE_TIMEOUT_MS);
+    expect(describeTimeoutMs(3, 10_000)).toBe(30_000);
+    expect(describeTimeoutMs(0, 10_000)).toBe(10_000);
+  });
+});
 
 describe("parseModelRef / formatModelRef", () => {
   it("parses provider/id", () => {
@@ -268,28 +276,6 @@ describe("parseDataUrl", () => {
   });
 });
 
-describe("makeReplacementText", () => {
-  it("emits input_text for responses blocks", () => {
-    const block = { type: "input_image", image_url: "data:image/png;base64,ABC" };
-    expect(makeReplacementText(block, "[Image: desc]")).toEqual({ type: "input_text", text: "[Image: desc]" });
-  });
-
-  it("emits text for openai-completions blocks", () => {
-    const block = { type: "image_url", image_url: { url: "data:image/png;base64,ABC" } };
-    expect(makeReplacementText(block, "[Image: desc]")).toEqual({ type: "text", text: "[Image: desc]" });
-  });
-
-  it("emits text for anthropic blocks", () => {
-    const block = { type: "image", source: { type: "base64", data: "ABC" } };
-    expect(makeReplacementText(block, "[Image: desc]")).toEqual({ type: "text", text: "[Image: desc]" });
-  });
-
-  it("emits text for pi-ai internal image blocks", () => {
-    const block = { type: "image", data: "ABC", mimeType: "image/png" };
-    expect(makeReplacementText(block, "[Image: desc]")).toEqual({ type: "text", text: "[Image: desc]" });
-  });
-});
-
 describe("config round-trip via PI_CODING_AGENT_DIR", () => {
   let tmpHome: string;
   let savedEnv: string | undefined;
@@ -342,107 +328,6 @@ describe("config round-trip via PI_CODING_AGENT_DIR", () => {
 
   it("getConfigPath points at extensions/pi-vision-watcher.json", () => {
     expect(getConfigPath()).toBe(join(tmpHome, "extensions", "pi-vision-watcher.json"));
-  });
-});
-
-describe("insertImageDescriptions", () => {
-  const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
-  const textBlock = { type: "text", text: "hello" } as const;
-
-  it("inserts a description text block before each image, keeping the image", async () => {
-    const describe = async (img: { mimeType: string }) => `[Image: ${img.mimeType}]`;
-    const result = await insertImageDescriptions(
-      [textBlock, { type: "image", data: base64, mimeType: "image/png" }],
-      describe,
-    );
-    expect(result.changed).toBe(true);
-    expect(result.content).toEqual([
-      { type: "text", text: "hello" },
-      { type: "text", text: "[Image: image/png]" },
-      { type: "image", data: base64, mimeType: "image/png" },
-    ]);
-  });
-
-  it("reports changed=false and leaves content unchanged when there are no images", async () => {
-    const result = await insertImageDescriptions([textBlock], async () => "never called");
-    expect(result.changed).toBe(false);
-    expect(result.content).toEqual([textBlock]);
-  });
-
-  it("handles empty content", async () => {
-    const result = await insertImageDescriptions([], async () => "x");
-    expect(result.changed).toBe(false);
-    expect(result.content).toEqual([]);
-  });
-
-  it("handles undefined / non-array content defensively", async () => {
-    const result = await insertImageDescriptions(undefined, async () => "x");
-    expect(result.changed).toBe(false);
-    expect(result.content).toEqual([]);
-  });
-
-  it("inserts a description before every image block across formats, keeping each image", async () => {
-    const describe = async (img: { data: string }) => `desc(${img.data})`;
-    const input: unknown = [
-      { type: "image", data: "AAA", mimeType: "image/png" },
-      textBlock,
-      { type: "image", source: { type: "base64", media_type: "image/gif", data: "BBB" } },
-      { type: "image_url", image_url: { url: "data:image/jpeg;base64,CCC" } },
-    ];
-    const result = await insertImageDescriptions(
-      input as (TextContent | ImageContent)[],
-      describe,
-    );
-    expect(result.changed).toBe(true);
-    expect(result.content).toEqual([
-      { type: "text", text: "desc(AAA)" },
-      { type: "image", data: "AAA", mimeType: "image/png" },
-      { type: "text", text: "hello" },
-      { type: "text", text: "desc(BBB)" },
-      { type: "image", source: { type: "base64", media_type: "image/gif", data: "BBB" } },
-      { type: "text", text: "desc(CCC)" },
-      { type: "image_url", image_url: { url: "data:image/jpeg;base64,CCC" } },
-    ]);
-  });
-
-  it("keeps the original image block by reference (for TUI kitty rendering)", async () => {
-    const image: ImageContent = { type: "image", data: base64, mimeType: "image/png" };
-    const result = await insertImageDescriptions([image], async () => "d");
-    expect(result.content[1]).toBe(image);
-  });
-
-  it("strips pi core's non-vision image note from text blocks when inserting a description", async () => {
-    const metadata: TextContent = {
-      type: "text",
-      text: `Read image file [image/png]\n[Image: original 2356x964]\n${NON_VISION_IMAGE_NOTE}`,
-    };
-    const image: ImageContent = { type: "image", data: base64, mimeType: "image/png" };
-    const result = await insertImageDescriptions([metadata, image], async () => "a vivid description");
-    expect(result.changed).toBe(true);
-    // Metadata text block no longer carries the contradictory note...
-    expect(result.content[0]).toEqual({
-      type: "text",
-      text: "Read image file [image/png]\n[Image: original 2356x964]",
-    });
-    // ...the inserted description follows...
-    expect(result.content[1]).toEqual({ type: "text", text: "a vivid description" });
-    // ...and the image is kept.
-    expect(result.content[2]).toBe(image);
-  });
-
-  it("leaves text blocks untouched when there are no images to describe", async () => {
-    const metadata: TextContent = { type: "text", text: `note?\n${NON_VISION_IMAGE_NOTE}` };
-    const result = await insertImageDescriptions([metadata], async () => "never called");
-    expect(result.changed).toBe(false);
-    expect(result.content[0]).toBe(metadata);
-  });
-
-  it("does not mutate the input array", async () => {
-    const inputImage: ImageContent = { type: "image", data: base64, mimeType: "image/png" };
-    const input: (TextContent | ImageContent)[] = [textBlock, inputImage];
-    await insertImageDescriptions(input, async () => "d");
-    expect(input).toEqual([textBlock, inputImage]);
-    expect(input).toHaveLength(2);
   });
 });
 
@@ -626,34 +511,6 @@ describe("markDescriptionTruncated", () => {
   it("the marker mentions the token limit so the agent/user know it's incomplete", () => {
     expect(DESCRIPTION_TRUNCATED_MARKER).toMatch(/truncat/i);
     expect(DESCRIPTION_TRUNCATED_MARKER).toMatch(/token/i);
-  });
-});
-
-describe("insertImageDescriptions with a batched (pre-resolved) describe callback", () => {
-  const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
-  const textBlock = { type: "text", text: "hello" } as const;
-
-  it("uses the pre-resolved map keyed by image hash, one describe source for many images", async () => {
-    // Simulate the batched path: a single Map<hash, description> feeds
-    // insertImageDescriptions via a lookup callback, so the insertion helper
-    // stays image-agnostic and testable without a provider.
-    const imgA: ImageContent = { type: "image", data: "AAA", mimeType: "image/png" };
-    const imgB: ImageContent = { type: "image", data: "BBB", mimeType: "image/png" };
-    const map = new Map<string, string>([
-      ["AAA\x00image/png", "[Image: desc A]"],
-      ["BBB\x00image/png", "[Image: desc B]"],
-    ]);
-    const lookup = async (img: { data: string; mimeType: string }) =>
-      map.get(`${img.data}\x00${img.mimeType}`) ?? "[Image: description unavailable]";
-    const result = await insertImageDescriptions([imgA, textBlock, imgB], lookup);
-    expect(result.changed).toBe(true);
-    expect(result.content).toEqual([
-      { type: "text", text: "[Image: desc A]" },
-      imgA,
-      textBlock,
-      { type: "text", text: "[Image: desc B]" },
-      imgB,
-    ]);
   });
 });
 

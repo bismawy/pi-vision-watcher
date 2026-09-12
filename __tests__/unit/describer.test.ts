@@ -93,6 +93,7 @@ function makeDeps(): DescriberDeps {
   return {
     reportUsage: vi.fn(),
     setLastError: vi.fn(),
+    setAttemptedModel: vi.fn(),
   };
 }
 
@@ -434,6 +435,20 @@ describe("error logging (src/error-log.ts)", () => {
     expect(entries[0].imageHashes).toEqual([ha]);
     expect(entries[0].imageCount).toBe(1);
     expect(entries[0].config?.thinking).toBe(false);
+  });
+
+  it("attributes a failover failure to the attempted model, not the configured primary", async () => {
+    // Regression: after the primary fails, the loader re-runs the batch with a
+    // fallback ref. The entry must name the model that actually ran — otherwise
+    // a fallback's 429 looks like the primary's error.
+    const fallbackModel = { provider: "tokenharbor", id: "mimo-v2.5:free" } as any;
+    const deps = makeDeps();
+    completeSimple.mockResolvedValueOnce(fakeResponse({ stopReason: "error", errorMessage: "429 limit" }));
+    await runBatch([{ img: img("AAA"), hash: "h" }], "", fallbackModel, modelRegistry, cfg, deps);
+    expect(deps.setAttemptedModel).toHaveBeenCalledWith("tokenharbor/mimo-v2.5:free");
+    const entries = readLog();
+    expect(entries[0].visionModel).toBe("p/id");
+    expect(entries[0].attemptedModel).toBe("tokenharbor/mimo-v2.5:free");
   });
 
   it("logs a single entry on an empty description", async () => {

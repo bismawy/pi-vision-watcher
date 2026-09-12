@@ -42,7 +42,31 @@ Then run `/vision-watcher` to pick your vision model (or set it directly: `/visi
 | `/vision-watcher add <provider/id>` | Force handoff on a specific model |
 | `/vision-watcher remove <provider/id>` | Remove model from forced handoff list |
 | `/vision-watcher thinking <level>` | Configure reasoning effort |
+| `/vision-watcher timeout <ms>` | Set the base per-image description timeout (default `45000`) |
+| `/vision-watcher prewarm <on\|off>` | Describe pasted images at paste-time (opt-in) |
+| `/vision-watcher async <on\|off>` | Inject pasted-image descriptions asynchronously when no matching `read` wins (alias: `fallback`) |
+| `/vision-watcher clear` | Clear the configured vision model |
 | `/vision-watcher enable` / `disable` | Toggle extension active state |
+| `/vision-watcher help` | List all subcommands |
+
+`async` is the async *clipboard* fallback and has nothing to do with the
+`fallbackModels` failover chain.
+
+In the picker:
+
+| Key | Action |
+|---|---|
+| `space` | Select the highlighted model as the primary describer (press again to clear) |
+| `ctrl+q` | Toggle the highlighted model in/out of the failover chain (marked 🔁, max 3). Not a mnemonic, and that's on purpose: `ctrl+f` is pi's find-text (bound since pi 0.85), `alt+f` is editor word-right, and `ctrl+alt+f` never survives Windows conhost/Windows Terminal. pi 0.85 also binds `ctrl+q` to `app.message.followUp`, which is inert while a picker is open — if it ever double-fires, `f2` is the free fallback (unbound in 0.84 and 0.85) |
+| `ctrl+t` | Walk the thinking ladder: off → minimal → low → medium → high → xhigh → max → off → … |
+| `ctrl+a` | Toggle async paste handoff |
+| `enter` / `ctrl+s` | Save (primary **and** chain together) |
+| `esc` | Cancel |
+
+The detail pane always shows the current configuration — primary, chain,
+thinking, async handoff — so every keypress shows exactly what will be saved.
+`space` is left to the search box while a filter query is present, so multi-word
+searches like `gemini 3.8` stay typeable.
 
 ## How it works
 
@@ -68,6 +92,11 @@ Then run `/vision-watcher` to pick your vision model (or set it directly: `/visi
 ```
 
 Most fields have sane defaults — `visionModel` is the only one you normally set.
+
+`fallbackModels` is the failover chain: when the primary describer fails (timeout,
+rate limit, auth), each entry is tried **in order** — fallback 1 fails, fallback 2
+runs, and so on until one returns a description. The picker caps the chain at 3
+entries (`ctrl+q`). Set it from the picker instead of hand-editing the file.
 
 </details>
 

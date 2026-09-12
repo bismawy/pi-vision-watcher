@@ -5,10 +5,11 @@
  * Uses the same patterns as pi's built-in selectors and pi-hide-providers:
  * - Lists connected (authenticated) models, vision-capable ones first (👀 badge)
  * - A leading "None" row clears the configured vision model
- * - Search/filter via Input component
- * - Enter or Ctrl+S confirms the highlighted model and saves
- * - Esc / Ctrl+C cancels
- * - The currently configured vision model is marked ✓
+ * - Space selects the highlighted model as the primary describer (toggle)
+ * - Ctrl+Alt+F toggles the highlighted model in/out of the failover chain (max 3)
+ * - Ctrl+T walks the thinking ladder, Ctrl+A toggles async paste handoff
+ * - Enter or Ctrl+S saves, Esc / Ctrl+C cancels
+ * - The primary is marked ✓, chain members 🔁
  */
 
 import {
@@ -28,6 +29,47 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { DynamicBorder, keyText } from "@earendil-works/pi-coding-agent";
 import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
+
+/** Failover chain length cap — three is already far past the point where a
+ *  fourth describer would ever be reached. */
+export const MAX_FALLBACKS = 3;
+
+/** Key that toggles failover-chain membership, and the hint shown for it.
+ *
+ *  Deliberately a single control byte nobody else wants: `ctrl+alt+f` never
+ *  survives Windows conhost/Windows Terminal (AltGr handling drops or downgrades
+ *  it), `alt+f` is pi's editor word-right, and `ctrl+f` is pi's find-text. */
+const FALLBACK_KEY = Key.ctrl("q");
+const FALLBACK_KEY_HINT = "ctrl+q";
+
+/** Provider ids that don't title-case cleanly. Everything else falls back to
+ *  word-capitalisation (`custom-openrouter-ai` → "Custom Openrouter AI"). */
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  "openai-codex": "OpenAI Codex",
+  anthropic: "Anthropic",
+  xai: "xAI",
+  github: "GitHub",
+  huggingface: "Hugging Face",
+  vertex: "Vertex AI",
+};
+
+const ACRONYMS = new Set(["ai", "api", "gpt", "llm", "mcp", "cli", "glm"]);
+
+/** Human-readable provider name for the detail pane. */
+export function providerLabel(provider: string): string {
+  const known = PROVIDER_LABELS[provider];
+  if (known) return known;
+  return provider
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((word) =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
 
 interface DisplayItem {
   /** "provider/id", or null for the synthetic "None" row. */
@@ -52,6 +94,9 @@ export interface VisionModelSelectorResult {
   thinkingLevel: ThinkingLevel;
   /** Whether pasted paths should be injected if no matching read wins. */
   asyncClipboardHandoff: boolean;
+  /** The failover chain, in list order. Enter/ctrl+s saves it together with
+   *  the primary selection — the picker edits both in one screen. */
+  fallbackModels: string[];
 }
 
 export class VisionModelSelectorComponent implements Component {
@@ -70,6 +115,10 @@ export class VisionModelSelectorComponent implements Component {
   private thinking: boolean;
   private thinkingLevel: ThinkingLevel;
   private asyncClipboardHandoff: boolean;
+  /** Fallback-chain membership, toggled in-place with {@link FALLBACK_KEY}. */
+  private fallbacks: Set<string>;
+  /** Transient hint (e.g. chain cap hit), rendered in the detail pane. */
+  private notice: string | null = null;
 
   private _focused = false;
   get focused(): boolean {
@@ -94,6 +143,7 @@ export class VisionModelSelectorComponent implements Component {
     currentThinkingLevel: ThinkingLevel,
     currentAsyncClipboardHandoff: boolean,
     done: (result: VisionModelSelectorResult) => void,
+    currentFallbacks: string[] = [],
   ) {
     this.theme = theme;
     this.done = done;
@@ -101,6 +151,7 @@ export class VisionModelSelectorComponent implements Component {
     this.thinking = currentThinking;
     this.thinkingLevel = currentThinkingLevel;
     this.asyncClipboardHandoff = currentAsyncClipboardHandoff;
+    this.fallbacks = new Set(currentFallbacks);
     this.allItems = this.buildItems(allModels);
     this.filteredItems = this.allItems;
 
@@ -111,10 +162,7 @@ export class VisionModelSelectorComponent implements Component {
     this.listContainer = new Container();
     this.footerText = new Text(this.getFooterText(), 0, 0);
 
-    this.searchInput.onSubmit = () => {
-      const item = this.filteredItems[this.selectedIndex];
-      if (item) this.confirm(item);
-    };
+    this.searchInput.onSubmit = () => this.save();
 
     this.updateList();
   }
@@ -172,15 +220,8 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
-    if (kb.matches(data, "tui.select.confirm")) {
-      const item = this.filteredItems[this.selectedIndex];
-      if (item) this.confirm(item);
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("s"))) {
-      const item = this.filteredItems[this.selectedIndex];
-      if (item) this.confirm(item);
+    if (kb.matches(data, "tui.select.confirm") || matchesKey(data, Key.ctrl("s"))) {
+      this.save();
       return;
     }
 
@@ -199,24 +240,38 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
+    // Space selects the highlighted model as the primary describer; pressing it
+    // again on the same model clears it back to "None". While a filter query is
+    // present, space is left to the search input so multi-word queries like
+    // "gemini 3.8" stay typeable.
+    if ((data === " " || matchesKey(data, Key.space)) && !this.searchInput.getValue()) {
+      const item = this.filteredItems[this.selectedIndex];
+      if (item) this.selectPrimary(item.ref);
+      return;
+    }
+
+    // Toggles the highlighted model in/out of the failover chain — a per-row
+    // flag rather than a separate screen, so the primary and the chain are
+    // chosen together. Intercepted before the search input (like the other ctrl
+    // shortcuts) so the key never lands in the filter text. See
+    // {@link FALLBACK_KEY} for why it isn't ctrl+f.
+    if (matchesKey(data, FALLBACK_KEY)) {
+      const item = this.filteredItems[this.selectedIndex];
+      if (item?.ref) this.toggleFallback(item.ref);
+      return;
+    }
+
     if (matchesKey(data, Key.ctrl("a"))) {
       this.asyncClipboardHandoff = !this.asyncClipboardHandoff;
       this.updateList();
       return;
     }
 
-    // Thinking controls — reuse pi's own app.thinking.* keybindings so the
-    // hints and behaviour match the rest of pi: ctrl+t toggles thinking
-    // on/off, shift+tab cycles the effort level. Intercepted before the
-    // search input so they never get swallowed as filter text.
-    if (kb.matches(data, "app.thinking.toggle")) {
-      this.thinking = !this.thinking;
-      this.updateList();
-      return;
-    }
-
-    if (kb.matches(data, "app.thinking.cycle")) {
-      this.cycleThinkingLevel();
+    // ctrl+t walks the whole thinking ladder (off → minimal → … → max → off) so
+    // one key covers on/off *and* effort — no separate shift+tab binding.
+    // Intercepted before the search input so it never lands in the filter text.
+    if (kb.matches(data, "app.thinking.toggle") || matchesKey(data, Key.ctrl("t"))) {
+      this.cycleThinking();
       this.updateList();
       return;
     }
@@ -277,22 +332,58 @@ export class VisionModelSelectorComponent implements Component {
 
   private getFooterText(): string {
     const totalCount = this.allItems.length - 1; // exclude the None row
+    const matches = this.searchInput.getValue()
+      ? `${this.filteredItems.length - 1} matches`
+      : `total ${totalCount} vision-capable models`;
 
-    const current = this.currentRef
-      ? `current: ${this.currentRef}`
-      : "current: none";
-
+    // The current selection lives in the detail pane above, so the footer only
+    // carries keys + the model count.
     const parts: string[] = [
-      `${keyText("tui.select.confirm")} select`,
-      `ctrl+s done`,
-      `${keyText("app.thinking.toggle")} thinking`,
-      `${keyText("app.thinking.cycle")} effort`,
-      `ctrl+a async fallback`,
-      `esc cancel`,
-      this.searchInput.getValue() ? `${this.filteredItems.length - 1} match` : `${totalCount} vision-capable models`,
+      "space select models",
+      `${keyText("tui.select.confirm")} done`,
+      `${FALLBACK_KEY_HINT} fallback (🔁)`,
+      "ctrl+t thinking",
+      "ctrl+a async fallback",
+      "esc cancel",
+      matches,
     ];
 
-    return this.theme.fg("dim", `  ${parts.join(" · ")} · ${current} `);
+    return this.theme.fg("dim", `  ${parts.join(" · ")} `);
+  }
+
+  /** Toggle a model's membership in the fallback chain, preserving list order
+   *  (the chain is tried in order, so the config array must be deterministic
+   *  rather than Set-iteration order). */
+  private toggleFallback(ref: string): void {
+    if (this.fallbacks.has(ref)) {
+      this.fallbacks.delete(ref);
+      this.notice = null;
+    } else if (this.fallbacks.size >= MAX_FALLBACKS) {
+      this.notice = `max ${MAX_FALLBACKS} fallbacks — remove one first (${FALLBACK_KEY_HINT})`;
+    } else {
+      this.fallbacks.add(ref);
+      this.notice = null;
+    }
+    this.updateList();
+  }
+
+  /** Space toggles the primary describer; picking the current one again clears
+   *  it (same as the None row), so one key both sets and unsets. */
+  private selectPrimary(ref: string | null): void {
+    this.currentRef = this.currentRef === ref ? null : ref;
+    this.notice = null;
+    this.updateList();
+  }
+
+  /** Fallback refs in list order (models the picker didn't show — e.g. one that
+   *  is no longer resolvable — are appended so a config value can't be
+   *  silently dropped just by opening the picker). */
+  private orderedFallbacks(): string[] {
+    const shown = this.allItems
+      .map((i) => i.ref)
+      .filter((r): r is string => !!r && this.fallbacks.has(r));
+    const unshown = [...this.fallbacks].filter((r) => !shown.includes(r));
+    return [...shown, ...unshown];
   }
 
   private refresh(): void {
@@ -318,8 +409,6 @@ export class VisionModelSelectorComponent implements Component {
       this.listContainer.addChild(
         new Text(this.theme.fg("muted", "  No matching models"), 0, 0),
       );
-      this.footerText.setText(this.getFooterText());
-      return;
     }
 
     const startIndex = Math.max(
@@ -355,8 +444,15 @@ export class VisionModelSelectorComponent implements Component {
         : item.none && this.currentRef === null
           ? this.theme.fg("success", " ✓")
           : "";
+      // Fallback marker — distinct from the primary's ✓ so a model can visibly
+      // be both the primary and a fallback (Sonnet as primary, Gemini as the
+      // chain behind it).
+      const fallbackMark =
+        item.ref && this.fallbacks.has(item.ref)
+          ? this.theme.fg("warning", " 🔁")
+          : "";
 
-      this.listContainer.addChild(new Text(`${prefix}${label}${current}`, 0, 0));
+      this.listContainer.addChild(new Text(`${prefix}${label}${current}${fallbackMark}`, 0, 0));
     }
 
     if (startIndex > 0 || endIndex < this.filteredItems.length) {
@@ -368,63 +464,96 @@ export class VisionModelSelectorComponent implements Component {
       );
     }
 
-    const selected = this.filteredItems[this.selectedIndex];
-    if (selected) {
-      this.listContainer.addChild(new Spacer(1));
-      if (selected.none) {
-        this.listContainer.addChild(
-          new Text(this.theme.fg("muted", `  ${selected.modelName}`), 0, 0),
-        );
-      } else {
-        this.listContainer.addChild(
-          new Text(this.theme.fg("muted", `  Model Name: ${selected.modelName}`), 0, 0),
-        );
-        this.listContainer.addChild(
-          new Text(this.theme.fg("dim", "  👀 vision-capable — recommended describer"), 0, 0),
-        );
-      }
-      this.renderThinkingDetail(selected);
-      const fallback = this.asyncClipboardHandoff
-        ? this.theme.fg("success", "on")
-        : this.theme.fg("muted", "off");
-      this.listContainer.addChild(
-        new Text(this.theme.fg("dim", `  Async pasted-path fallback: ${fallback}`), 0, 0),
-      );
-    }
-
+    this.renderDetail();
     this.footerText.setText(this.getFooterText());
   }
 
-  /** Append the thinking on/off + effort line to the detail pane, with a
-   *  warning when the highlighted model can't reason (so the setting would
-   *  be silently ignored by the describer). */
-  private renderThinkingDetail(selected: DisplayItem): void {
-    const state = this.thinking
-      ? this.theme.fg("success", `on (${this.thinkingLevel})`)
-      : this.theme.fg("muted", "off");
-    this.listContainer.addChild(
-      new Text(this.theme.fg("dim", `  Thinking: ${state}`), 0, 0),
+  private itemByRef(ref: string): DisplayItem | undefined {
+    return this.allItems.find((i) => i.ref === ref);
+  }
+
+  /** "Gemini 3.8 Flash (Antigravity)", or the raw ref when it isn't in the
+   *  registry right now (stale config) so it stays visible instead of blank. */
+  private refLabel(ref: string): string {
+    const item = this.itemByRef(ref);
+    if (!item) return ref;
+    const provider = providerLabel(item.provider);
+    // Model display names often already carry the vendor — "Gemini 3.8 Flash
+    // (Antigravity)" would otherwise come out as "… (Antigravity) (Antigravity)".
+    return item.modelName.toLowerCase().includes(provider.toLowerCase())
+      ? item.modelName
+      : `${item.modelName} (${provider})`;
+  }
+
+  /** The detail pane summarises the *configuration* (primary, failover chain
+   *  and toggles) rather than the highlighted row, so each space / ctrl+q
+   *  press shows exactly what will be saved. */
+  private renderDetail(): void {
+    const line = (label: string, value: string) =>
+      this.listContainer.addChild(
+        new Text(this.theme.fg("dim", `  ${label}`) + value, 0, 0),
+      );
+
+    this.listContainer.addChild(new Spacer(1));
+    line(
+      "Vision-capable (👀): ",
+      this.currentRef
+        ? this.refLabel(this.currentRef)
+        : this.theme.fg("muted", "none — vision handoff disabled"),
     );
-    if (this.thinking && !selected.none && !selected.reasoning) {
+
+    const chain = this.orderedFallbacks();
+    line(
+      "Fallback (🔁): ",
+      chain.length
+        ? `${this.theme.fg("success", "on")} - ${chain.map((r) => this.refLabel(r)).join(", ")}`
+        : this.theme.fg("muted", "off"),
+    );
+
+    line(
+      "Thinking: ",
+      this.thinking
+        ? this.theme.fg("success", `on (${this.thinkingLevel})`)
+        : this.theme.fg("muted", "off"),
+    );
+
+    line(
+      "Async pasted-path fallback: ",
+      this.asyncClipboardHandoff
+        ? this.theme.fg("success", "on")
+        : this.theme.fg("muted", "off"),
+    );
+
+    // The warning follows the *highlighted* row: it answers "what happens if I
+    // pick this model", which is also how you'd notice it while browsing.
+    const highlighted = this.filteredItems[this.selectedIndex];
+    if (this.thinking && highlighted && !highlighted.none && !highlighted.reasoning) {
       this.listContainer.addChild(
         new Text(
           this.theme.fg(
             "warning",
-            `  ⚠ ${selected.modelId} declares no reasoning — thinking will be ignored`,
+            `  ⚠ ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
           ),
           0, 0,
         ),
       );
     }
+
+    if (this.notice) {
+      this.listContainer.addChild(
+        new Text(this.theme.fg("warning", `  ${this.notice}`), 0, 0),
+      );
+    }
   }
 
-  private confirm(item: DisplayItem): void {
+  private save(): void {
     this.done({
-      ref: item.ref,
+      ref: this.currentRef,
       cancelled: false,
       thinking: this.thinking,
       thinkingLevel: this.thinkingLevel,
       asyncClipboardHandoff: this.asyncClipboardHandoff,
+      fallbackModels: this.orderedFallbacks(),
     });
   }
 
@@ -435,18 +564,23 @@ export class VisionModelSelectorComponent implements Component {
       thinking: this.thinking,
       thinkingLevel: this.thinkingLevel,
       asyncClipboardHandoff: this.asyncClipboardHandoff,
+      fallbackModels: this.orderedFallbacks(),
     });
   }
 
-  /** Cycle the thinking effort forward through {@link THINKING_LEVELS},
-   *  wrapping from the last back to the first. Cycling implicitly turns
-   *  thinking on (you don't usually cycle a switch you want off) — matching
-   *  pi's own `app.thinking.cycle` behaviour, which is a no-op only when the
-   *  active model has no reasoning. */
-  private cycleThinkingLevel(): void {
-    if (!this.thinking) this.thinking = true;
-    const idx = THINKING_LEVELS.indexOf(this.thinkingLevel);
-    const next = THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length]!;
-    this.thinkingLevel = next;
+  /** Walk the thinking ladder with one key: off → minimal → low → medium →
+   *  high → xhigh → max → off → minimal → …
+   *
+   *  A single index over off + {@link THINKING_LEVELS} so the cycle always
+   *  advances. Keeping a separate "remembered level" while off turns the tail
+   *  into a two-position toggle once you reach max (off → max → off → max). */
+  private cycleThinking(): void {
+    const ladder = THINKING_LEVELS.length + 1; // position 0 = off
+    const current = this.thinking
+      ? THINKING_LEVELS.indexOf(this.thinkingLevel) + 1
+      : 0;
+    const next = (Math.max(current, 0) + 1) % ladder;
+    this.thinking = next > 0;
+    if (next > 0) this.thinkingLevel = THINKING_LEVELS[next - 1]!;
   }
 }

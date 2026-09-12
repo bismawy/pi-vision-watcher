@@ -76,6 +76,11 @@ let config: VisionHandoffConfig = readConfig();
  *  Cleared at the start of each describer attempt. */
 let lastDescriberError: string | null = null;
 
+/** Model ref actually attempted for the most recent describer call. Set by the
+ *  describer (via {@link LoaderDeps}) so a failover failure is attributed to
+ *  the fallback that ran, not to `config.visionModel`. */
+let lastDescriberModel: string | null = null;
+
 /** Image hashes we've already warned the user about this session. Prevents the
  *  `context` hook (which fires before every LLM turn) from re-warning on the
  *  same failing images every turn — describer failures aren't cached, so
@@ -229,6 +234,9 @@ const loaderDeps: LoaderDeps = {
   reportUsage: (record) => reportUsage(record),
   setLastError: (msg) => {
     lastDescriberError = msg;
+  },
+  setAttemptedModel: (ref) => {
+    lastDescriberModel = ref;
   },
 };
 const loader = new DescriptionLoader(loaderDeps);
@@ -390,13 +398,21 @@ function warnFailedImages(
     phase: "warn",
     reason,
     visionModel: config.visionModel,
+    attemptedModel: lastDescriberModel ?? undefined,
     imageHashes: newlyFailed,
     imageCount: newlyFailed.length,
     activeModel: ctx.model ? formatModelRef(ctx.model.provider, ctx.model.id) : undefined,
   });
   if (!ctx.hasUI) return;
+  // Name the model that actually failed. After a failover the error belongs to
+  // a fallback, so reporting the configured primary sends users chasing the
+  // wrong provider (e.g. a 429 from the fallback attributed to the primary).
+  const attempted =
+    lastDescriberModel && lastDescriberModel !== config.visionModel
+      ? `${config.visionModel} → fallback ${lastDescriberModel}`
+      : config.visionModel;
   ctx.ui.notify(
-    `pi-vision-watcher: image description failed — ${reason}. Vision model: ${config.visionModel}`,
+    `pi-vision-watcher: image description failed — ${reason}. Vision model: ${attempted}`,
     "warning",
   );
 }
@@ -779,9 +795,11 @@ export default function (pi: ExtensionAPI) {
   // in-process (modelOverrides is Pi's topmost config layer, so it wins even
   // over a regenerated models[] entry). The model then registers as text-only,
   // autoHandoff covers it naturally, and /model shows it correctly. FALLBACK
-  // (write failed): force handoff via handoffModels. Either way, the failed
-  // turn's images are still in history; the context hook describes them on the
-  // retry instead of failing again.
+  // (write failed): force handoff via handoffModels. On success we ALSO add the
+  // model to handoffModels — belt and braces, so the retry is described even if
+  // the metadata write is later reverted by a models.json regeneration. Either
+  // way, the failed turn's images are still in history; the context hook
+  // describes them on the retry instead of failing again.
   pi.on("message_end", (event, ctx) => {
     const msg = event.message as {
       role?: string;
@@ -843,7 +861,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("vision-watcher", {
     description: HANDOFF_COMMAND_DESCRIPTION,
     getArgumentCompletions(prefix: string) {
-      const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "fallback", "timeout", "add", "remove", "clear", "help"];
+      const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "async", "fallback", "timeout", "add", "remove", "clear", "help"];
       const matches = subcommands.filter((s) => s.startsWith(prefix));
       return matches.length > 0 ? matches.map((s) => ({ value: s, label: s })) : null;
     },
@@ -879,8 +897,9 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
         "                               Set the vision describer's thinking effort (off = disabled)",
         "  /vision-watcher prewarm <on|off>",
         "                               Toggle describing pasted images at paste-time (opt-in, off by default)",
-        "  /vision-watcher fallback <on|off>",
+        "  /vision-watcher async <on|off>",
         "                               Inject pasted-image descriptions asynchronously when no matching read wins",
+        "                               (alias: /vision-watcher fallback — NOT the model failover chain)",
         "  /vision-watcher timeout <ms>   Set the per-image description timeout (default 45000)",
         "  /vision-watcher add <p/id>     Force handoff for an extra model",
         "  /vision-watcher remove <p/id>  Stop forcing handoff for a model",
@@ -892,7 +911,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
         "  read images through a dataloader (one batched vision call); context swaps",
         "  image blocks in the payload for the cached text description.",
         "  prewarm on wraps the editor to describe pasted images at paste-time.",
-        "  fallback on asynchronously injects a collapsed description unless a matching read wins.",
+        "  async on asynchronously injects a collapsed description unless a matching read wins.",
       ].join("\n"),
       "info",
     );
@@ -939,7 +958,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
     return;
   }
 
-  if (subcommand === "fallback") {
+  if (subcommand === "async" || subcommand === "fallback") {
     handleFallbackSubcommand(ctx, rest);
     return;
   }
@@ -1099,19 +1118,19 @@ function handlePrewarmSubcommand(ctx: ExtensionCommandContext, rest: string): vo
   updateConfig(ctx, (c) => ({ ...c, prewarmPastedImages: on }), note);
 }
 
-/** Handle /vision-watcher fallback <on|off>. */
+/** Handle `/vision-watcher async <on|off>` (alias: `fallback`). */
 function handleFallbackSubcommand(ctx: ExtensionCommandContext, rest: string): void {
   const value = rest.trim().toLowerCase();
   if (!value) {
     ctx.ui.notify(
       `Async pasted-path fallback: ${config.asyncClipboardHandoff ? "on" : "off"}.\n` +
-        "Usage: /vision-watcher fallback <on|off>",
+        "Usage: /vision-watcher async <on|off>",
       "info",
     );
     return;
   }
   if (value !== "on" && value !== "off") {
-    ctx.ui.notify("Usage: /vision-watcher fallback <on|off>", "warning");
+    ctx.ui.notify("Usage: /vision-watcher async <on|off>", "warning");
     return;
   }
   const on = value === "on";
@@ -1153,21 +1172,30 @@ function handleTimeoutSubcommand(ctx: ExtensionCommandContext, rest: string): vo
   );
 }
 
+/** Connected, vision-capable models — the same set the pickers show. Text-only
+ *  models can't describe images, so they would only produce
+ *  "[Image: description unavailable]" errors. getAvailable() excludes the whole
+ *  catalogue of unauthenticated models. */
+function availableVisionModels(ctx: ExtensionCommandContext): Array<{
+  provider: string;
+  id: string;
+  name: string;
+  input?: ("text" | "image")[];
+  reasoning?: boolean;
+}> {
+  return ctx.modelRegistry
+    .getAvailable()
+    .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }))
+    .filter((m) => isVisionModel(m));
+}
+
 async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) {
     ctx.ui.notify("/vision-watcher requires interactive mode.", "error");
     return;
   }
 
-  // Only list models that are actually connected (configured auth via /login,
-  // /better-custom, a models.json apiKey, or env/command keys) — the same set
-  // the built-in /model picker shows. getAvailable() excludes the whole
-  // catalogue of unauthenticated models.
-  // Only vision-capable models can describe images — text-only models are hidden.
-  const availableModels = ctx.modelRegistry
-    .getAvailable()
-    .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }))
-    .filter((m) => isVisionModel(m));
+  const availableModels = availableVisionModels(ctx);
 
   if (ctx.mode !== "tui") {
     const modelItems = ["None", ...availableModels.map((m) => `${m.provider}/${m.id}`)];
@@ -1204,6 +1232,7 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
       config.thinkingLevel,
       config.asyncClipboardHandoff,
       (r) => done(r),
+      config.fallbackModels,
     );
     return {
       render(width: number) {
@@ -1233,10 +1262,16 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   const thinkingNote = thinking
     ? `thinking on (${thinkingLevel})${ref ? " — applies only if the vision model supports reasoning" : ""}`
     : "thinking off";
+  const fallbackModels = result.fallbackModels ?? config.fallbackModels;
+  const fallbackNote = fallbackModels.length
+    ? ` · 🔁 fallbacks: ${fallbackModels.join(" → ")}`
+    : " · 🔁 no fallbacks";
   updateConfig(
     ctx,
-    (c) => ({ ...c, visionModel: ref, thinking, thinkingLevel, asyncClipboardHandoff }),
-    ref ? `Vision model set to ${ref} · ${thinkingNote}` : `Vision model cleared · ${thinkingNote}`,
+    (c) => ({ ...c, visionModel: ref, thinking, thinkingLevel, asyncClipboardHandoff, fallbackModels }),
+    ref
+      ? `Vision model set to ${ref} · ${thinkingNote}${fallbackNote}`
+      : `Vision model cleared · ${thinkingNote}${fallbackNote}`,
   );
   if (!ref) {
     ctx.ui.notify("Handoff is inactive until you pick a vision model.", "warning");
@@ -1252,6 +1287,7 @@ function showStatus(ctx: ExtensionCommandContext): void {
   lines.push(`Thinking: ${config.thinking ? `on (${config.thinkingLevel})` : "off"}`);
   lines.push(`Paste-time prewarm: ${config.prewarmPastedImages ? `on${editorInstalled ? "" : " (inactive — another custom editor is active)"}` : "off"}`);
   lines.push(`Async pasted-path fallback: ${config.asyncClipboardHandoff ? "on" : "off"}`);
+  lines.push(`Fallback models: ${config.fallbackModels.length ? config.fallbackModels.join(" → ") : "(none)"}`);
   lines.push(`Timeout (per image): ${config.describeTimeoutMs} ms`);
   lines.push(`maxTokens: ${config.maxTokens ?? "unbounded"} · cacheMax: ${config.cacheMax} · maxDescriptionLines: ${config.maxDescriptionLines === 0 ? "unbounded" : config.maxDescriptionLines}`);
 

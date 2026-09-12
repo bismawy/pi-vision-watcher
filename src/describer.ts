@@ -187,6 +187,11 @@ export interface DescriberDeps {
   /** Set the most-recent describer failure message (surfaced to the user by the engine).
    *  Pass `null` to clear before a fresh attempt. */
   setLastError(msg: string | null): void;
+  /** Record the model ref ACTUALLY attempted for the latest describer call.
+   *  Differs from `config.visionModel` when a failover fallback ran — the
+   *  warning must name the model that failed, not the configured primary.
+   *  Optional so older callers/tests compile unchanged. */
+  setAttemptedModel?(ref: string): void;
 }
 
 /** The result of a batched describer call: per-image raw descriptions keyed by hash. */
@@ -212,6 +217,7 @@ export async function runBatch(
   turnSignal?: AbortSignal,
 ): Promise<BatchResult> {
   const out: BatchResult = new Map();
+  deps.setAttemptedModel?.(formatModelRef(visionModel.provider, visionModel.id));
   const auth = await modelRegistry.getApiKeyAndHeaders(visionModel);
   if (!auth.ok || !auth.apiKey) {
     const reason = !auth.ok
@@ -222,6 +228,7 @@ export async function runBatch(
       phase: "batch",
       reason,
       visionModel: cfg.visionModel,
+      attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
       imageHashes: misses.map((m) => m.hash),
       imageCount: misses.length,
       config: configSnapshot(cfg),
@@ -277,6 +284,7 @@ export async function runBatch(
           phase: "batch",
           reason,
           visionModel: cfg.visionModel,
+          attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
           imageHashes: hashes,
           imageCount: misses.length,
           stopReason: response.stopReason,
@@ -299,6 +307,7 @@ export async function runBatch(
         phase: "batch",
         reason: "vision model returned an empty description",
         visionModel: cfg.visionModel,
+        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
         imageHashes: hashes,
         imageCount: misses.length,
         config: configSnapshot(cfg),
@@ -356,6 +365,7 @@ export async function runBatch(
         phase: "batch",
         reason,
         visionModel: cfg.visionModel,
+        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
         imageHashes: misses.map((m) => m.hash),
         imageCount: misses.length,
         timedOut,
@@ -386,6 +396,7 @@ export async function describeSingle(
   deps: DescriberDeps,
   turnSignal?: AbortSignal,
 ): Promise<string | null> {
+  deps.setAttemptedModel?.(formatModelRef(visionModel.provider, visionModel.id));
   const auth = await modelRegistry.getApiKeyAndHeaders(visionModel);
   if (!auth.ok || !auth.apiKey) {
     const reason = !auth.ok
@@ -396,6 +407,7 @@ export async function describeSingle(
       phase: "single",
       reason,
       visionModel: cfg.visionModel,
+      attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
       imageHashes: [imageHash(img.mimeType, img.data)],
       imageCount: 1,
       config: configSnapshot(cfg),
@@ -449,6 +461,7 @@ export async function describeSingle(
           phase: "single",
           reason,
           visionModel: cfg.visionModel,
+          attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
           imageHashes: [hash],
           imageCount: 1,
           stopReason: response.stopReason,
@@ -471,6 +484,7 @@ export async function describeSingle(
         phase: "single",
         reason: "vision model returned an empty description",
         visionModel: cfg.visionModel,
+        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
         imageHashes: [hash],
         imageCount: 1,
         config: configSnapshot(cfg),
@@ -496,6 +510,7 @@ export async function describeSingle(
         phase: "single",
         reason,
         visionModel: cfg.visionModel,
+        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
         imageHashes: [imageHash(img.mimeType, img.data)],
         imageCount: 1,
         timedOut,

@@ -212,7 +212,13 @@ export class DescriptionLoader implements Disposable {
   loadDescription(img: ExtractedImage): Promise<string> {
     const hash = imageHash(img.mimeType, img.data);
     const cached = this.cache.get(hash);
-    if (cached) return cached;
+    if (cached) {
+      // Re-insert to refresh Map order: insertion order is FIFO, so without
+      // this a hot image ages like a cold one and gets evicted ahead of it.
+      this.cache.delete(hash);
+      this.cache.set(hash, cached);
+      return cached;
+    }
 
     if (!this.batch) {
       this.batch = { keys: [], imgs: [], callbacks: [] };

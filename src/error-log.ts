@@ -53,6 +53,9 @@ export interface VisionErrorLogEntry {
   reason: string;
   /** Configured vision model ref ("provider/id"), or null if unset. */
   visionModel: string | null;
+  /** The model ACTUALLY called for this entry ("provider/id") — differs from
+   *  {@link visionModel} when a failover fallback was attempted. */
+  attemptedModel?: string;
   /** Image hashes the failure covered (batch/single) or the warning named. */
   imageHashes: string[];
   /** Number of images involved. */

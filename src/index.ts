@@ -5,7 +5,7 @@
  * convention pi-model-sort uses for picker-backed extensions.
  */
 
-import type { ImageContent, TextContent, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -86,15 +86,15 @@ export function isThinkingLevel(level: unknown): level is ThinkingLevel {
  *  per batch size. */
 export const DESCRIBE_TIMEOUT_MS = 45_000;
 
-/** Per-batch timeout: the base timeout plus a per-image budget so a 5-image
- *  batch isn't held to the same wall-clock budget as a single image. The
- *  describer generates exhaustive prose per image, and websocket transport
- *  adds latency, so the budget scales with the number of images in the call.
- *  `baseTimeout` defaults to {@link DESCRIBE_TIMEOUT_MS} and is overridden by
- *  the configured `describeTimeoutMs` field. */
+/** Per-batch timeout: `baseTimeout` is the per-image budget, so the wall-clock
+ *  budget scales with the number of images in the call (a 5-image batch isn't
+ *  held to a single image's budget — the describer generates exhaustive prose
+ *  per image and websocket transport adds latency). `baseTimeout` defaults to
+ *  {@link DESCRIBE_TIMEOUT_MS} and is overridden by the configured
+ *  `describeTimeoutMs` field, so lowering it fails over sooner for the *whole*
+ *  batch. */
 export function describeTimeoutMs(imageCount: number, baseTimeout: number = DESCRIBE_TIMEOUT_MS): number {
-  const perImage = 45_000;
-  return baseTimeout + Math.max(0, imageCount - 1) * perImage;
+  return baseTimeout * Math.max(1, imageCount);
 }
 
 /**
@@ -456,15 +456,6 @@ export function extractImageFromBlock(block: unknown): ExtractedImage | null {
   return null;
 }
 
-/** Build a text block that replaces an image block, matching the request format. */
-export function makeReplacementText(block: unknown, description: string): Record<string, unknown> {
-  const b = (block ?? null) as Record<string, unknown> | null;
-  if (b?.type === "input_image") {
-    return { type: "input_text", text: description };
-  }
-  return { type: "text", text: description };
-}
-
 /** Outcome of {@link truncateDescription}. */
 export interface TruncatedDescription {
   text: string;
@@ -589,74 +580,4 @@ export function wrapDescription(description: string, cfg: VisionHandoffConfig): 
       ? truncateDescription(description, cfg.maxDescriptionLines)
       : { text: description };
   return `${IMAGE_PLACEHOLDER_PREFIX}${final}${IMAGE_PLACEHOLDER_SUFFIX}`;
-}
-
-/** Outcome of {@link insertImageDescriptions}. */
-export interface ReplacedContent {
-  content: (TextContent | ImageContent)[];
-  /** True iff at least one image block had a description inserted before it. */
-  changed: boolean;
-}
-
-/**
- * Insert a description text block before each image block in a tool-result /
- * message content array, KEEPING the image block in place.
- *
- * Why insert (not replace): the stored tool-result content is the single
- * source for both the TUI render (kitty inline images read it via
- * `result.content.filter(c => c.type === "image")`) and the provider payload.
- * Replacing the image would strip it from the terminal render. Keeping the
- * image preserves kitty rendering; the inserted description still reaches
- * non-vision models because pi-ai's `downgradeUnsupportedImages` only rewrites
- * `type: "image"` blocks for non-vision models — text blocks (including this
- * description) pass through untouched to the provider.
- *
- * `describe` is injected (rather than calling the vision model directly) so the
- * extract → describe → insert pipeline is unit-testable without standing up a
- * provider, registry, and API call. The extension wires its real `describeImage`
- * into this helper in its `tool_result` handler.
- *
- * When at least one description is inserted, also strips pi core's
- * {@link NON_VISION_IMAGE_NOTE} from text blocks — the note (appended by the
- * read tool for non-vision models) would otherwise contradict the inserted
- * description. Text blocks are reassigned (not mutated in place); the input
- * array is left untouched.
- *
- * Returns a new array and `changed: false` when there were no images, so
- * callers can short-circuit and avoid mutating pi's stored result unnecessarily.
- */
-export async function insertImageDescriptions(
-  content: readonly (TextContent | ImageContent)[] | undefined,
-  describe: (img: ExtractedImage) => Promise<string>,
-): Promise<ReplacedContent> {
-  if (!Array.isArray(content)) {
-    return { content: [], changed: false };
-  }
-  const next: (TextContent | ImageContent)[] = [];
-  let changed = false;
-  for (const block of content) {
-    const img = extractImageFromBlock(block);
-    if (!img) {
-      next.push(block);
-      continue;
-    }
-    const description = await describe(img);
-    next.push({ type: "text", text: description } satisfies TextContent);
-    next.push(block);
-    changed = true;
-  }
-  if (!changed) {
-    return { content: next, changed };
-  }
-  // We inserted at least one description. Strip the read tool's
-  // "[Current model does not support images...]" note from text blocks — it
-  // contradicts the description we just inserted ("image will be omitted" vs.
-  // the description that follows) and confuses the model.
-  for (let i = 0; i < next.length; i++) {
-    const block = next[i];
-    if (block.type === "text" && typeof block.text === "string" && block.text.includes(NON_VISION_IMAGE_NOTE)) {
-      next[i] = { type: "text", text: stripNonVisionImageNote(block.text) } satisfies TextContent;
-    }
-  }
-  return { content: next, changed };
 }

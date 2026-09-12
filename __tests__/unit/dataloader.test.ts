@@ -90,6 +90,25 @@ describe("DescriptionLoader batching", () => {
     expect(runBatch.mock.calls.length).toBe(callsBefore);
   });
 
+  it("keeps a hot image cached: a cache hit refreshes order (LRU, not FIFO)", async () => {
+    const loader = makeLoader({}, { cacheMax: 2 });
+    loader.bindTurnContext({ modelRegistry: {} as any });
+    const a = img("AAA");
+    const b = img("BBB");
+    const c = img("CCC");
+
+    await loader.loadDescription(a);
+    await loader.loadDescription(b);
+    await loader.loadDescription(a); // hit — must refresh A's recency
+    await loader.loadDescription(c); // evicts the coldest (B), not A
+
+    const callsBefore = runBatch.mock.calls.length;
+    await loader.loadDescription(a);
+    expect(runBatch.mock.calls.length).toBe(callsBefore); // A survived
+    await loader.loadDescription(b);
+    expect(runBatch.mock.calls.length).toBe(callsBefore + 1); // B was evicted
+  });
+
   it("retries a totally-failed batch once, recovering a transient blip in the same turn", async () => {
     const loader = makeLoader({ retryBackoffMs: 0 });
     loader.bindTurnContext({ modelRegistry: {} as any });

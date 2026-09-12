@@ -23,4 +23,21 @@ describe("VisionModelSelectorComponent", () => {
       expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
   });
+
+  it.each([20, 40, 60])("never renders wider than %i columns with a fallback chain", (width) => {
+    const component = new VisionModelSelectorComponent(
+      theme,
+      [{ provider: "provider-with-a-long-name", id: "model-with-a-long-name", name: "Long Vision Model", input: ["text", "image"], reasoning: true }],
+      "provider-with-a-long-name/model-with-a-long-name",
+      true,
+      "high",
+      true,
+      () => {},
+      ["provider-with-a-long-name/model-with-a-long-name"],
+    );
+
+    for (const line of component.render(width)) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
 });

@@ -134,11 +134,13 @@ describe("VisionModelSelectorComponent", () => {
     expect(done.mock.calls[0][0].fallbackModels).toEqual([]);
   });
 
-  it("renders the updated footer format", () => {
+  it("renders the footer legend with the count first", () => {
     const { text } = build();
-    const normalized = text().replace(/\s*\n\s*/g, " ");
-    expect(normalized).toContain(
-      "enter = done | space = vision models | ctrl+q = fallback models | ctrl+shift+q = reset fallbacks models | ctrl+t = thinking | ctrl+a = async fallback | esc = cancel | total 4 models.",
+    // Whitespace is flattened: the real renderer wraps this line at narrow
+    // widths, which collapses the double spaces between legend entries.
+    const flat = text().replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "4 models · [Enter] Done [Space] Vision [Ctrl+q] Fallback [Ctrl+Shift+q] Reset [Ctrl+t] Think [Esc] Cancel",
     );
   });
 

@@ -42,7 +42,6 @@ export const MAX_FALLBACKS = 3;
 const FALLBACK_KEY = Key.ctrl("q");
 const FALLBACK_KEY_HINT = "ctrl+q";
 const RESET_FALLBACKS_KEY = Key.ctrlShift("q");
-const RESET_FALLBACKS_KEY_HINT = "ctrl+shift+q";
 
 /** Provider ids that don't title-case cleanly. Everything else falls back to
  *  word-capitalisation (`custom-openrouter-ai` → "Custom Openrouter AI"). */
@@ -339,24 +338,25 @@ export class VisionModelSelectorComponent implements Component {
 
   private getFooterText(): string {
     const totalCount = this.allItems.length - 1; // exclude the None row
-    const matches = this.searchInput.getValue()
-      ? `${this.filteredItems.length - 1} matches.`
-      : `total ${totalCount} models.`;
+    const count = this.searchInput.getValue()
+      ? `${this.filteredItems.length - 1} matches`
+      : `${totalCount} models`;
 
-    // The current selection lives in the detail pane above, so the footer only
-    // carries keys + the model count.
-    const parts: string[] = [
-      `${keyText("tui.select.confirm")} = done`,
-      "space = vision models",
-      `${FALLBACK_KEY_HINT} = fallback models`,
-      `${RESET_FALLBACKS_KEY_HINT} = reset fallbacks models`,
-      "ctrl+t = thinking",
-      "ctrl+a = async fallback",
-      "esc = cancel",
-      matches,
-    ];
+    // One legend line: the count carries the accent colour so it is the first
+    // thing the eye lands on, while the keys stay dim so they do not compete
+    // with the picker itself. ctrl+a toggles the async clipboard handoff; it
+    // is deliberately left out so this line stays readable at 80 columns.
+    const confirm = keyText("tui.select.confirm");
+    const legend = [
+      `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Done`,
+      "[Space] Vision",
+      "[Ctrl+q] Fallback",
+      "[Ctrl+Shift+q] Reset",
+      "[Ctrl+t] Think",
+      "[Esc] Cancel",
+    ].join("  ");
 
-    return this.theme.fg("dim", `  ${parts.join(" | ")}`);
+    return `${this.theme.fg("dim", "  ")}${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${legend}`)}`;
   }
 
   private clearFallbacks(): void {

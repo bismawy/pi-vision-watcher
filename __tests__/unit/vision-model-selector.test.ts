@@ -23,6 +23,7 @@ const DOWN = "\x1b[B";
 const ENTER = "\r";
 const SPACE = " ";
 const CTRL_Q = "\x11";
+const CTRL_SHIFT_Q = "\x1b[113;6u";
 const CTRL_T = "\x14";
 
 function build(opts: {
@@ -124,6 +125,21 @@ describe("VisionModelSelectorComponent", () => {
     const { component, done } = build({ currentRef: "p/a", fallbacks: ["ghost/model", "p/b"] });
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].fallbackModels).toEqual(["p/b", "ghost/model"]);
+  });
+
+  it("resets all fallbacks with ctrl+shift+q", () => {
+    const { component, done, text } = build({ currentRef: "p/a", fallbacks: ["ghost/model", "p/b", "p/c"] });
+    component.handleInput(CTRL_SHIFT_Q);
+    component.handleInput(ENTER);
+    expect(done.mock.calls[0][0].fallbackModels).toEqual([]);
+  });
+
+  it("renders the updated footer format", () => {
+    const { text } = build();
+    const normalized = text().replace(/\s*\n\s*/g, " ");
+    expect(normalized).toContain(
+      "enter=done | space=select vision models | ctrl+q=fallback models | ctrl+shift+q=reset fallbacks models | ctrl+t=thinking | ctrl+a=async fallback | esc=cancel | total 4 models.",
+    );
   });
 
   it("walks the thinking ladder with ctrl+t and wraps without sticking", () => {

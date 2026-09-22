@@ -339,12 +339,12 @@ export class VisionModelSelectorComponent implements Component {
     // The current selection lives in the detail pane above, so the footer only
     // carries keys + the model count.
     const parts: string[] = [
-      "space select models",
-      `${keyText("tui.select.confirm")} done`,
-      `${FALLBACK_KEY_HINT} fallback (🔁)`,
-      "ctrl+t thinking",
-      "ctrl+a async fallback",
-      "esc cancel",
+      `${keyText("tui.select.confirm")} = done`,
+      "space = select vision models (👀)",
+      `${FALLBACK_KEY_HINT} = fallback models (🔁)`,
+      "ctrl+t = thinking",
+      "ctrl+a = async fallback",
+      "esc = cancel",
       matches,
     ];
 

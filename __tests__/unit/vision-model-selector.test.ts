@@ -138,7 +138,7 @@ describe("VisionModelSelectorComponent", () => {
     const { text } = build();
     const normalized = text().replace(/\s*\n\s*/g, " ");
     expect(normalized).toContain(
-      "enter=done | space=select vision models | ctrl+q=fallback models | ctrl+shift+q=reset fallbacks models | ctrl+t=thinking | ctrl+a=async fallback | esc=cancel | total 4 models.",
+      "enter = done | space = vision models | ctrl+q = fallback models | ctrl+shift+q = reset fallbacks models | ctrl+t = thinking | ctrl+a = async fallback | esc = cancel | total 4 models.",
     );
   });
 

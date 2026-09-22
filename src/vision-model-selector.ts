@@ -41,6 +41,8 @@ export const MAX_FALLBACKS = 3;
  *  it), `alt+f` is pi's editor word-right, and `ctrl+f` is pi's find-text. */
 const FALLBACK_KEY = Key.ctrl("q");
 const FALLBACK_KEY_HINT = "ctrl+q";
+const RESET_FALLBACKS_KEY = Key.ctrlShift("q");
+const RESET_FALLBACKS_KEY_HINT = "ctrl+shift+q";
 
 /** Provider ids that don't title-case cleanly. Everything else falls back to
  *  word-capitalisation (`custom-openrouter-ai` → "Custom Openrouter AI"). */
@@ -255,6 +257,11 @@ export class VisionModelSelectorComponent implements Component {
     // chosen together. Intercepted before the search input (like the other ctrl
     // shortcuts) so the key never lands in the filter text. See
     // {@link FALLBACK_KEY} for why it isn't ctrl+f.
+    if (matchesKey(data, RESET_FALLBACKS_KEY)) {
+      this.clearFallbacks();
+      return;
+    }
+
     if (matchesKey(data, FALLBACK_KEY)) {
       const item = this.filteredItems[this.selectedIndex];
       if (item?.ref) this.toggleFallback(item.ref);
@@ -333,22 +340,30 @@ export class VisionModelSelectorComponent implements Component {
   private getFooterText(): string {
     const totalCount = this.allItems.length - 1; // exclude the None row
     const matches = this.searchInput.getValue()
-      ? `${this.filteredItems.length - 1} matches`
-      : `total ${totalCount} vision-capable models`;
+      ? `${this.filteredItems.length - 1} matches.`
+      : `total ${totalCount} models.`;
 
     // The current selection lives in the detail pane above, so the footer only
     // carries keys + the model count.
     const parts: string[] = [
-      `${keyText("tui.select.confirm")} = done`,
-      "space = select vision models (👀)",
-      `${FALLBACK_KEY_HINT} = fallback models (🔁)`,
-      "ctrl+t = thinking",
-      "ctrl+a = async fallback",
-      "esc = cancel",
+      `${keyText("tui.select.confirm")}=done`,
+      "space=select vision models",
+      `${FALLBACK_KEY_HINT}=fallback models`,
+      `${RESET_FALLBACKS_KEY_HINT}=reset fallbacks models`,
+      "ctrl+t=thinking",
+      "ctrl+a=async fallback",
+      "esc=cancel",
       matches,
     ];
 
-    return this.theme.fg("dim", `  ${parts.join(" · ")} `);
+    return this.theme.fg("dim", `  ${parts.join(" | ")}`);
+  }
+
+  private clearFallbacks(): void {
+    if (this.fallbacks.size === 0) return;
+    this.fallbacks.clear();
+    this.notice = null;
+    this.updateList();
   }
 
   /** Toggle a model's membership in the fallback chain, preserving list order

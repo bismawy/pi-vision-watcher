@@ -171,7 +171,6 @@ export class VisionModelSelectorComponent implements Component {
   render(width: number): string[] {
     const lines: string[] = [];
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
-    lines.push("");
     lines.push(
       truncateToWidth(
         this.theme.fg("accent", this.theme.bold("Vision Watcher")),

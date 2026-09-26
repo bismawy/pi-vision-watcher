@@ -11,8 +11,6 @@ Give text-only [pi](https://github.com/earendil-works/pi-coding-agent) models vi
 
 </div>
 
-<img src="assets/screenshot.webp" alt="pi-vision-watcher" width="100%">
-
 ## What it does
 
 Paste an image, attach a file, or have the agent `read` one — pi-vision-watcher describes it in the background with your chosen vision model and feeds the description to whatever text-only model you're using (DeepSeek, local models, etc.).

@@ -27,7 +27,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import { keyText } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, keyText } from "@earendil-works/pi-coding-agent";
 import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
 
 /** Failover chain length cap — three is already far past the point where a
@@ -166,39 +166,16 @@ export class VisionModelSelectorComponent implements Component {
       placeholderStyle: (text) => this.theme.fg("muted", text),
     });
     this.listContainer = new Container();
-    // paddingX 2 keeps the legend in the gutter, so its continuation
-    // line hangs there too instead of starting flush against the border.
-    this.footerText = new Text(this.getFooterText(), 2, 0);
+    this.footerText = new Text(this.getFooterText(), 0, 0);
 
     this.searchInput.onSubmit = () => this.save();
 
     this.updateList();
   }
 
-  /**
-   * The dialog wears the same rounded, dim border as pi-arnative's boxes
-   * (`lib/box.ts`): `│ ` + content + ` │`, i.e. 4 columns of chrome, so the
-   * content is laid out 4 columns narrower than the dialog. Below 12 columns
-   * the border is dropped rather than drawn over the content.
-   */
   render(width: number): string[] {
-    if (width < 12) {
-      return this.contentLines(width).map((line) => truncateToWidth(line, width, ""));
-    }
-    const inner = width - 4;
-    const side = this.theme.fg("dim", "│");
-    const edge = (l: string, r: string) =>
-      this.theme.fg("dim", `${l}${"─".repeat(width - 2)}${r}`);
-    const rows = this.contentLines(inner).map((row) => {
-      const line = truncateToWidth(row, inner, "");
-      return `${side} ${line}${" ".repeat(inner - visibleWidth(line))} ${side}`;
-    });
-    return [edge("╭", "╮"), ...rows, edge("╰", "╯")];
-  }
-
-  /** Everything inside the border, laid out for the given content width. */
-  private contentLines(width: number): string[] {
     const lines: string[] = [];
+    lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
     lines.push(
       truncateToWidth(
         this.theme.fg("accent", this.theme.bold("Vision Watcher")),
@@ -229,7 +206,8 @@ export class VisionModelSelectorComponent implements Component {
     lines.push(...this.detailLines(width));
     lines.push("");
     lines.push(...this.footerText.render(width));
-    return lines;
+    lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
+    return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
   handleInput(data: string): void {

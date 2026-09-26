@@ -44,14 +44,7 @@ function build(opts: {
     done,
     opts.fallbacks ?? [],
   );
-  // The border is chrome, not content: strip the side glyphs so assertions
-  // read the dialog body the way they did before the box was added.
-  const text = () =>
-    component
-      .render(100)
-      .map((line) => line.split("│").join(""))
-      .join("\n");
-  return { component, done, text };
+  return { component, done, text: () => component.render(100).join("\n") };
 }
 
 describe("VisionModelSelectorComponent", () => {
@@ -209,11 +202,8 @@ describe("VisionModelSelectorComponent", () => {
     const { component } = build();
     const field = component.render(100).find((l) => l.includes("filter models"));
     expect(field).toBeDefined();
-    // "│ " is the box side, then the two-column gutter shared with the
-    // rows and the detail pane.
-    expect(field!).toMatch(/^│ {3}> /);
-    // The placeholder’s first glyph is reverse-video, so "type" is split.
-    expect(field!).toContain("filter models");
+    // Two-space gutter, same as the rows and the detail pane.
+    expect(field!.startsWith("  > ")).toBe(true);
   });
 
   it("wraps a long detail value under its own label", () => {
@@ -231,10 +221,9 @@ describe("VisionModelSelectorComponent", () => {
     const rows = component.render(40);
     const start = rows.findIndex((l) => l.includes("Fallback (🔁):"));
     expect(start).toBeGreaterThan(-1);
-    // "Fallback (🔁): " is 15 columns -> the value starts at 17 after the
-    // "│ " box side, and so do its continuation lines (they used to spill
-    // back to column 0).
-    expect(rows[start + 1]!.startsWith(`│ ${" ".repeat(17)}`)).toBe(true);
+    // "Fallback (🔁): " is 15 columns -> the value starts at 17, and so do its
+    // continuation lines (they used to spill back to column 0).
+    expect(rows[start + 1]!.startsWith(" ".repeat(17))).toBe(true);
     for (const row of rows.slice(start, start + 4)) {
       expect(visibleWidth(row)).toBeLessThanOrEqual(40);
     }

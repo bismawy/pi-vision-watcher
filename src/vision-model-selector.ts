@@ -20,9 +20,9 @@ import {
   Input,
   Key,
   matchesKey,
-  Spacer,
   Text,
   truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -159,7 +159,12 @@ export class VisionModelSelectorComponent implements Component {
     const startIdx = this.allItems.findIndex((i) => i.ref === currentRef);
     this.selectedIndex = startIdx >= 0 ? startIdx : 0;
 
-    this.searchInput = new Input();
+    // A bare `> ` gives no hint that this line filters the list, so the field
+    // carries an inline placeholder until something is typed.
+    this.searchInput = new Input({
+      placeholder: "type to filter models…",
+      placeholderStyle: (text) => this.theme.fg("muted", text),
+    });
     this.listContainer = new Container();
     this.footerText = new Text(this.getFooterText(), 0, 0);
 
@@ -188,9 +193,17 @@ export class VisionModelSelectorComponent implements Component {
       ),
     );
     lines.push("");
-    lines.push(...this.searchInput.render(width));
+    // Indented to the list's two-column gutter: at column 0 the field reads as
+    // a stray line rather than as the thing the list is filtered by.
+    lines.push(
+      ...this.searchInput
+        .render(Math.max(1, width - 2))
+        .map((line) => `  ${line}`),
+    );
     lines.push("");
     lines.push(...this.listContainer.render(width));
+    lines.push("");
+    lines.push(...this.detailLines(width));
     lines.push("");
     lines.push(...this.footerText.render(width));
     lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
@@ -478,7 +491,6 @@ export class VisionModelSelectorComponent implements Component {
       );
     }
 
-    this.renderDetail();
     this.footerText.setText(this.getFooterText());
   }
 
@@ -501,14 +513,33 @@ export class VisionModelSelectorComponent implements Component {
 
   /** The detail pane summarises the *configuration* (primary, failover chain
    *  and toggles) rather than the highlighted row, so each space / ctrl+q
-   *  press shows exactly what will be saved. */
-  private renderDetail(): void {
-    const line = (label: string, value: string) =>
-      this.listContainer.addChild(
-        new Text(this.theme.fg("dim", `  ${label}`) + value, 0, 0),
-      );
+   *  press shows exactly what will be saved.
+   *
+   *  Built per frame rather than cached in a child component because the
+   *  label/value split only pays off once the width is known: a long fallback
+   *  chain then wraps under its own value instead of spilling to column 0. */
+  private detailLines(width: number): string[] {
+    const out: string[] = [];
 
-    this.listContainer.addChild(new Spacer(1));
+    const line = (label: string, value: string) => {
+      const indent = " ".repeat(2 + visibleWidth(label));
+      const wrapped = wrapTextWithAnsi(
+        value,
+        Math.max(8, width - visibleWidth(indent)),
+      );
+      out.push(`${this.theme.fg("dim", `  ${label}`)}${wrapped[0] ?? ""}`);
+      for (const extra of wrapped.slice(1)) out.push(indent + extra);
+    };
+
+    // Free-standing sentence (warning / transient notice), hanging-indented
+    // under its own `⚠`/first word.
+    const note = (text: string) => {
+      const indent = "    ";
+      wrapTextWithAnsi(text, Math.max(8, width - indent.length)).forEach(
+        (part, i) => out.push(i === 0 ? part : indent + part),
+      );
+    };
+
     line(
       "Vision-capable (👀): ",
       this.currentRef
@@ -542,22 +573,17 @@ export class VisionModelSelectorComponent implements Component {
     // pick this model", which is also how you'd notice it while browsing.
     const highlighted = this.filteredItems[this.selectedIndex];
     if (this.thinking && highlighted && !highlighted.none && !highlighted.reasoning) {
-      this.listContainer.addChild(
-        new Text(
-          this.theme.fg(
-            "warning",
-            `  ⚠ ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
-          ),
-          0, 0,
+      note(
+        this.theme.fg(
+          "warning",
+          `  ⚠ ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
         ),
       );
     }
 
-    if (this.notice) {
-      this.listContainer.addChild(
-        new Text(this.theme.fg("warning", `  ${this.notice}`), 0, 0),
-      );
-    }
+    if (this.notice) note(this.theme.fg("warning", `  ${this.notice}`));
+
+    return out;
   }
 
   private save(): void {

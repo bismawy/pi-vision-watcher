@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   MAX_FALLBACKS,
   providerLabel,
@@ -195,6 +196,37 @@ describe("VisionModelSelectorComponent", () => {
     const rendered = component.render(100).join("\n");
     expect(rendered).toContain("Vision-capable (👀): Gemini 3.8 Flash (Antigravity)");
     expect(rendered).not.toContain("(Antigravity) (Antigravity)");
+  });
+
+  it("labels the filter field and keeps it in the list's gutter", () => {
+    const { component } = build();
+    const field = component.render(100).find((l) => l.includes("filter models"));
+    expect(field).toBeDefined();
+    // Two-space gutter, same as the rows and the detail pane.
+    expect(field!.startsWith("  > ")).toBe(true);
+  });
+
+  it("wraps a long detail value under its own label", () => {
+    const done = vi.fn();
+    const component = new VisionModelSelectorComponent(
+      theme,
+      models as any,
+      "p/a",
+      false,
+      "medium",
+      false,
+      done,
+      ["p/a", "p/b", "p/c", "p/d"],
+    );
+    const rows = component.render(40);
+    const start = rows.findIndex((l) => l.includes("Fallback (🔁):"));
+    expect(start).toBeGreaterThan(-1);
+    // "Fallback (🔁): " is 15 columns -> the value starts at 17, and so do its
+    // continuation lines (they used to spill back to column 0).
+    expect(rows[start + 1]!.startsWith(" ".repeat(17))).toBe(true);
+    for (const row of rows.slice(start, start + 4)) {
+      expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+    }
   });
 
   it("labels providers for the detail pane", () => {

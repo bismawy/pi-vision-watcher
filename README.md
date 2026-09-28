@@ -6,7 +6,7 @@ Give text-only models vision. Seamless multimodal handoff. Built for Pi.
 [![badge](https://shieldcn.dev/npm/@bismawy/pi-vision-watcher.svg?variant=outline&size=xs)](https://www.npmjs.com/package/@bismawy/pi-vision-watcher)
 [![license](https://shieldcn.dev/github/bismawy/pi-vision-watcher/license.svg?variant=outline&size=xs)](https://github.com/bismawy/pi-vision-watcher)
 
-<img src="https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp" alt="Vision Watcher: intelligent vision handoff for text-only coding models in Pi" width="100%">
+![Vision Watcher: intelligent vision handoff for text-only coding models in Pi](https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp)
 
 ## Overview
 

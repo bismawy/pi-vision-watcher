@@ -1,12 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.15] - 2026-09-28
+
+### Added
+- Standard `CHANGELOG.md` tracking repository release history according to Keep a Changelog.
+- Added `dev` script (`pi --extension ./vision-watcher.ts`) to `package.json` for live local testing without installation.
 
 ### Changed
 - Refreshed README presentation layout, badge aesthetics, and structure to match the standard `pi-arnative` specification.
-- Made README banner image responsive and full-width (`width="100%"`).
-- Added `dev` script (`pi --extension ./vision-watcher.ts`) to `package.json` for live local testing without installation.
-- Updated `pi.image` manifest URL to `assets/banner.webp`.
+- Standardized README banner image syntax (`![alt](url)`) for full compatibility with pi.dev markdown sanitization.
+- Updated `pi.image` manifest URL to `assets/banner.webp` with `assets/screenshot.webp` backwards compatibility.
+- Registered `CHANGELOG.md` and `LICENSE` in `package.json` `"files"` packaging list.
 
 ### Fixed
 - Fixed model picker detail pane hanging wrapped values and aligned filter input field with the list gutter.

@@ -1,25 +1,22 @@
-<div align="center">
+# Vision Watcher
 
-# pi-vision-watcher
+Give text-only models vision. Seamless multimodal handoff. Built for Pi.
 
-Give text-only [pi](https://github.com/earendil-works/pi-coding-agent) models vision — images are described by a vision model you pick, then handed off to text-only coding models without interrupting your workflow.
+[![Custom badge](https://shieldcn.dev/badge/pi-%20Packages.svg?variant=outline&size=xs&logo=ri%3APiPiBold)](https://pi.dev/packages/@bismawy/pi-vision-watcher)
+[![badge](https://shieldcn.dev/npm/@bismawy/pi-vision-watcher.svg?variant=outline&size=xs)](https://www.npmjs.com/package/@bismawy/pi-vision-watcher)
+[![license](https://shieldcn.dev/github/bismawy/pi-vision-watcher/license.svg?variant=outline&size=xs)](https://github.com/bismawy/pi-vision-watcher)
 
-[pi package](https://pi.dev/packages/@bismawy/pi-vision-watcher) · [npm](https://www.npmjs.com/package/@bismawy/pi-vision-watcher) · [Issues](https://github.com/bismawy/pi-vision-watcher/issues)
+![Vision Watcher: intelligent vision handoff for text-only coding models in Pi](https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp)
 
-![npm](https://img.shields.io/npm/v/@bismawy/pi-vision-watcher)
-![license](https://img.shields.io/badge/license-MIT-green)
+## Overview
 
-</div>
+pi-vision-watcher gives text-only pi models vision — images are described in the background by a vision model you pick, then handed off to text-only coding models without interrupting your workflow.
 
-## What it does
-
-Paste an image, attach a file, or have the agent `read` one — pi-vision-watcher describes it in the background with your chosen vision model and feeds the description to whatever text-only model you're using (DeepSeek, local models, etc.).
-
-- **Connected-only picker:** `/vision-watcher` shows only vision-capable models from providers where you actually have credentials.
-- **Batching & cache:** multiple images across parallel tool calls are batched into one describer request; cached images (SHA-256) are never re-described.
-- **False-vision healing:** aggregator providers sometimes flag text-only models as multimodal, causing HTTP 400s. The extension proactively forces handoff for them and auto-heals `models.json` in-process.
-- **Thinking controls:** adjust reasoning effort (`off` – `max`) for reasoning-capable vision models.
-- **Fallback chains:** automatically falls back to backup vision models when the primary is rate-limited or down.
+- Connected-only Picker: `/vision-watcher` shows only vision-capable models from providers where you actually have credentials.
+- Batching & Cache: Multiple images across parallel tool calls are batched into one describer request; cached images (SHA-256) are never re-described.
+- False-Vision Healing: Aggregator providers sometimes flag text-only models as multimodal, causing HTTP 400s. The extension proactively forces handoff for them and auto-heals `models.json` in-process.
+- Thinking Controls: Adjust reasoning effort (`off` – `max`) for reasoning-capable vision models.
+- Fallback Chains: Automatically falls back to backup vision models when the primary is rate-limited or down.
 
 ## Install
 
@@ -27,46 +24,48 @@ Paste an image, attach a file, or have the agent `read` one — pi-vision-watche
 pi install npm:@bismawy/pi-vision-watcher
 ```
 
-Then run `/vision-watcher` to pick your vision model (or set it directly: `/vision-watcher model openai/gpt-4o`). Handoff is on by default — just switch to any text-only model and work as usual.
+Run `/vision-watcher` to pick your vision model (or set it directly: `/vision-watcher model openai/gpt-4o`). Handoff is on by default — switch to any text-only model and work as usual.
+
+To test locally without installing:
+```bash
+pi --extension ./vision-watcher.ts
+```
+
+## Shortcuts
+
+| Key | Action |
+| --- | --- |
+| `space` | Select highlighted model as primary describer (press again to clear) |
+| `ctrl+q` · `f2` | Toggle highlighted model in/out of failover chain (marked 🔗, max 3) |
+| `ctrl+t` | Walk thinking ladder (`off` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max`) |
+| `ctrl+a` | Toggle async paste handoff |
+| `enter` · `ctrl+s` | Save configuration (primary describer and chain) |
+| `esc` | Cancel and exit picker |
+
+> **Notes:**
+> - `ctrl+q` toggles backup models safely; `f2` is also available as a fallback key.
+> - While filtering models in search, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable.
+> - The detail pane shows live configuration — primary, chain, thinking, and async handoff — so every keypress previews what will be saved.
 
 ## Commands
 
 | Command | Action |
-| :--- | :--- |
+| --- | --- |
 | `/vision-watcher` | Interactive picker for connected vision models |
 | `/vision-watcher model <provider/id>` | Set primary vision describer directly |
 | `/vision-watcher status` | View current configuration |
 | `/vision-watcher auto <on\|off>` | Toggle automatic handoff (default: `on`) |
 | `/vision-watcher add <provider/id>` | Force handoff on a specific model |
 | `/vision-watcher remove <provider/id>` | Remove model from forced handoff list |
-| `/vision-watcher thinking <level>` | Configure reasoning effort |
-| `/vision-watcher timeout <ms>` | Set the base per-image description timeout (default `45000`) |
+| `/vision-watcher thinking <level>` | Configure reasoning effort (`off` – `max`) |
+| `/vision-watcher timeout <ms>` | Set per-image description timeout (default `45000`) |
 | `/vision-watcher prewarm <on\|off>` | Describe pasted images at paste-time (opt-in) |
-| `/vision-watcher async <on\|off>` | Inject pasted-image descriptions asynchronously when no matching `read` wins (alias: `fallback`) |
-| `/vision-watcher clear` | Clear the configured vision model |
-| `/vision-watcher enable` / `disable` | Toggle extension active state |
+| `/vision-watcher async <on\|off>` | Inject pasted-image descriptions asynchronously when no matching `read` wins |
+| `/vision-watcher clear` | Clear configured vision model |
+| `/vision-watcher enable` · `disable` | Toggle extension active state |
 | `/vision-watcher help` | List all subcommands |
 
-`async` is the async *clipboard* fallback and has nothing to do with the
-`fallbackModels` failover chain.
-
-In the picker:
-
-| Key | Action |
-|---|---|
-| `space` | Select the highlighted model as the primary describer (press again to clear) |
-| `ctrl+q` | Toggle the highlighted model in/out of the failover chain (marked 🔁, max 3). Not a mnemonic, and that's on purpose: `ctrl+f` is pi's find-text (bound since pi 0.85), `alt+f` is editor word-right, and `ctrl+alt+f` never survives Windows conhost/Windows Terminal. pi 0.85 also binds `ctrl+q` to `app.message.followUp`, which is inert while a picker is open — if it ever double-fires, `f2` is the free fallback (unbound in 0.84 and 0.85) |
-| `ctrl+t` | Walk the thinking ladder: off → minimal → low → medium → high → xhigh → max → off → … |
-| `ctrl+a` | Toggle async paste handoff |
-| `enter` / `ctrl+s` | Save (primary **and** chain together) |
-| `esc` | Cancel |
-
-The detail pane always shows the current configuration — primary, chain,
-thinking, async handoff — so every keypress shows exactly what will be saved.
-`space` is left to the search box while a filter query is present, so multi-word
-searches like `gemini 3.8` stay typeable.
-
-## How it works
+## Architecture
 
 <details>
 <summary><b>Configuration</b> (<code>~/.pi/agent/extensions/pi-vision-watcher.json</code>)</summary>
@@ -91,15 +90,12 @@ searches like `gemini 3.8` stay typeable.
 
 Most fields have sane defaults — `visionModel` is the only one you normally set.
 
-`fallbackModels` is the failover chain: when the primary describer fails (timeout,
-rate limit, auth), each entry is tried **in order** — fallback 1 fails, fallback 2
-runs, and so on until one returns a description. The picker caps the chain at 3
-entries (`ctrl+q`). Set it from the picker instead of hand-editing the file.
+`fallbackModels` is the failover chain: when the primary describer fails (timeout, rate limit, auth), each entry is tried **in order** until one returns a description. The picker caps the chain at 3 entries (`ctrl+q`). Set it from the picker instead of hand-editing the file.
 
 </details>
 
 <details>
-<summary><b>Diagnostics & recovery</b></summary>
+<summary><b>Diagnostics & Recovery</b></summary>
 
 - Failed vision calls log with stack traces to `~/.pi/agent/logs/pi-vision-watcher/errors.log` and degrade gracefully to `[Image: description unavailable]`.
 - When a model falsely advertises image capability and 400s, the error is captured on `message_end`, `modelOverrides.<model>.input = ["text"]` is written to `models.json`, and the registry refreshes in-process.
@@ -107,13 +103,27 @@ entries (`ctrl+q`). Set it from the picker instead of hand-editing the file.
 </details>
 
 <details>
+<summary><b>Components</b></summary>
+
+| File | Role |
+| --- | --- |
+| `vision-watcher.ts` | Extension entry point, lifecycle hooks, and CLI command handlers |
+| `src/vision-model-selector.ts` | Interactive TUI model picker with connected-only filtering |
+| `src/describer.ts` | Vision API request orchestration, multi-image batching, and failover chains |
+| `src/dataloader.ts` | Batched image loader to prevent redundant parallel requests |
+| `src/image.ts` | Image hashing (SHA-256), memory caching, and MIME detection |
+| `src/prewarm-editor.ts` | Paste-time image prewarming and async clipboard injection |
+| `src/error-log.ts` | Structured logging and error capture |
+
+</details>
+
+<details>
 <summary><b>Development</b></summary>
 
 ```bash
-bun install
-bun run test          # Vitest suite (240+ unit tests)
-bun run typecheck
-bun run lint:dead
+npm test          # Vitest suite (250+ unit tests)
+npm run typecheck # TypeScript checks
+npm run lint:dead # Knip dead code analysis
 ```
 
 </details>
@@ -122,6 +132,6 @@ bun run lint:dead
 
 Distributed under the **MIT** license.
 
-## Developer
+## Author
 
-Developed and maintained by [Bisma](https://github.com/bismawy).
+[Bisma](https://github.com/bismawy)

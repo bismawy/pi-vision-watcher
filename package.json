@@ -38,6 +38,7 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "dev": "pi --extension ./vision-watcher.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
@@ -57,7 +58,7 @@
     "extensions": [
       "./vision-watcher.ts"
     ],
-    "image": "https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/screenshot.webp"
+    "image": "https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

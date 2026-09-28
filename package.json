@@ -34,6 +34,8 @@
   "files": [
     "*.ts",
     "src/",
+    "CHANGELOG.md",
+    "LICENSE",
     "README.md"
   ],
   "scripts": {

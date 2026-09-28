@@ -1,6 +1,6 @@
 # Vision Watcher
 
-Give text-only models vision. Seamless multimodal handoff. Built for Pi.
+Intelligent vision handoff. Connected models. Built for Pi.
 
 [![Custom badge](https://shieldcn.dev/badge/pi-%20Packages.svg?variant=outline&size=xs&logo=ri%3APiPiBold)](https://pi.dev/packages/@bismawy/pi-vision-watcher)
 [![badge](https://shieldcn.dev/npm/@bismawy/pi-vision-watcher.svg?variant=outline&size=xs)](https://www.npmjs.com/package/@bismawy/pi-vision-watcher)

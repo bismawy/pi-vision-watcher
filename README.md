@@ -1,16 +1,16 @@
 # Vision Watcher
 
-Intelligent vision handoff. Connected models. Built for Pi.
+Intelligent vision watcher. Connected models. Zero workflow interruption.
 
 [![Custom badge](https://shieldcn.dev/badge/pi-%20Packages.svg?variant=outline&size=xs&logo=ri%3APiPiBold)](https://pi.dev/packages/@bismawy/pi-vision-watcher)
 [![badge](https://shieldcn.dev/npm/@bismawy/pi-vision-watcher.svg?variant=outline&size=xs)](https://www.npmjs.com/package/@bismawy/pi-vision-watcher)
 [![license](https://shieldcn.dev/github/bismawy/pi-vision-watcher/license.svg?variant=outline&size=xs)](https://github.com/bismawy/pi-vision-watcher)
 
-<img src="https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp" alt="Vision Watcher: intelligent vision handoff for text-only coding models in Pi" width="100%">
+<img src="https://raw.githubusercontent.com/bismawy/pi-vision-watcher/main/assets/banner.webp" alt="Vision Watcher: intelligent vision watcher for text-only coding models in Pi" width="100%">
 
 ## Overview
 
-pi-vision-watcher gives text-only pi models vision — images are described in the background by a vision model you pick, then handed off to text-only coding models without interrupting your workflow.
+pi-vision-watcher gives text-only pi models vision — images are described in the background by a vision model you pick, watching over text-only coding models without interrupting your workflow.
 
 - Connected-only Picker: `/vision-watcher` shows only vision-capable models from providers where you actually have credentials.
 - Batching & Cache: Multiple images across parallel tool calls are batched into one describer request; cached images (SHA-256) are never re-described.

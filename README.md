@@ -12,11 +12,11 @@ Intelligent vision watcher. Connected models. Zero workflow interruption.
 
 pi-vision-watcher gives text-only pi models vision — images are described in the background by a vision model you pick, watching over text-only coding models without interrupting your workflow.
 
-- Connected-only Picker: `/vision-watcher` shows only vision-capable models from providers where you actually have credentials.
-- Batching & Cache: Multiple images across parallel tool calls are batched into one describer request; cached images (SHA-256) are never re-described.
-- False-Vision Healing: Aggregator providers sometimes flag text-only models as multimodal, causing HTTP 400s. The extension proactively forces handoff for them and auto-heals `models.json` in-process.
-- Thinking Controls: Adjust reasoning effort (`off` – `max`) for reasoning-capable vision models.
-- Fallback Chains: Automatically falls back to backup vision models when the primary is rate-limited or down.
+- Connected-only Picker: `/vision-watcher` filters models to connected providers with valid credentials.
+- Batching & Cache: Parallel tool calls batch images into one request; SHA-256 cache prevents redundant descriptions.
+- False-Vision Healing: Proactively detects text-only models falsely advertised as multimodal and auto-heals `models.json` on HTTP 400.
+- Thinking Controls: Configurable reasoning effort (`off` – `max`) for reasoning-capable vision models.
+- Failover Chains: Ordered fallbacks to backup vision models on timeouts, rate limits, or auth errors.
 
 ## Install
 
@@ -24,7 +24,7 @@ pi-vision-watcher gives text-only pi models vision — images are described in t
 pi install npm:@bismawy/pi-vision-watcher
 ```
 
-Run `/vision-watcher` to pick your vision model (or set it directly: `/vision-watcher model openai/gpt-4o`). Handoff is on by default — switch to any text-only model and work as usual.
+Run `/vision-watcher` to pick a vision model (or `/vision-watcher model <provider/id>`). Handoff is enabled by default.
 
 To test locally without installing:
 ```bash
@@ -35,17 +35,17 @@ pi --extension ./vision-watcher.ts
 
 | Key | Action |
 | --- | --- |
-| `space` | Select highlighted model as primary describer (press again to clear) |
+| `space` | Toggle highlighted model as primary describer |
 | `ctrl+q` · `f2` | Toggle highlighted model in/out of failover chain (marked 🔗, max 3) |
+| `ctrl+shift+q` | Reset failover chain |
 | `ctrl+t` | Walk thinking ladder (`off` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max`) |
 | `ctrl+a` | Toggle async paste handoff |
 | `enter` · `ctrl+s` | Save configuration (primary describer and chain) |
 | `esc` | Cancel and exit picker |
 
 > **Notes:**
-> - `ctrl+q` toggles backup models safely; `f2` is also available as a fallback key.
-> - While filtering models in search, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable.
-> - The detail pane shows live configuration — primary, chain, thinking, and async handoff — so every keypress previews what will be saved.
+> - In filter mode, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable.
+> - The detail pane renders live preview updates before saving.
 
 ## Commands
 
@@ -53,16 +53,14 @@ pi --extension ./vision-watcher.ts
 | --- | --- |
 | `/vision-watcher` | Interactive picker for connected vision models |
 | `/vision-watcher model <provider/id>` | Set primary vision describer directly |
-| `/vision-watcher status` | View current configuration |
+| `/vision-watcher status` | View active configuration and failover chain |
 | `/vision-watcher auto <on\|off>` | Toggle automatic handoff (default: `on`) |
-| `/vision-watcher add <provider/id>` | Force handoff on a specific model |
-| `/vision-watcher remove <provider/id>` | Remove model from forced handoff list |
+| `/vision-watcher add \| remove <provider/id>` | Force or unforce handoff on specific models |
 | `/vision-watcher thinking <level>` | Configure reasoning effort (`off` – `max`) |
-| `/vision-watcher timeout <ms>` | Set per-image description timeout (default `45000`) |
-| `/vision-watcher prewarm <on\|off>` | Describe pasted images at paste-time (opt-in) |
-| `/vision-watcher async <on\|off>` | Inject pasted-image descriptions asynchronously when no matching `read` wins |
+| `/vision-watcher timeout <ms>` | Set per-image description timeout in ms (default: `45000`) |
+| `/vision-watcher prewarm \| async <on\|off>` | Toggle paste-time prewarming or async clipboard fallback |
 | `/vision-watcher clear` | Clear configured vision model |
-| `/vision-watcher enable` · `disable` | Toggle extension active state |
+| `/vision-watcher enable \| disable` | Toggle extension active state |
 | `/vision-watcher help` | List all subcommands |
 
 ## Architecture

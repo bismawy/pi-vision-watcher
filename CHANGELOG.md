@@ -8,6 +8,7 @@
 
 ### Changed
 - Refreshed README presentation layout, badge aesthetics, and structure to match the standard `pi-arnative` specification.
+- Streamlined README commands and shortcuts tables, tightened bullet copywriting, and repaired link icon character.
 - Standardized README tagline (`Intelligent vision watcher. Connected models. Zero workflow interruption.`) and `package.json` description to use vision watcher identity.
 - Refreshed package keywords and repository topics to focus on vision-watcher, image-describer, and failover capabilities (purged legacy handoff tags).
 - Standardized README banner image to full-width responsive `<img width="100%">` matching `pi-jev-eye`.

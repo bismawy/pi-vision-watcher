@@ -8,8 +8,8 @@
 
 ### Changed
 - Refreshed README presentation layout, badge aesthetics, and structure to match the standard `pi-arnative` specification.
-- Standardized README banner image syntax (`![alt](url)`) for full compatibility with pi.dev markdown sanitization.
-- Updated `pi.image` manifest URL to `assets/banner.webp` with `assets/screenshot.webp` backwards compatibility.
+- Standardized README banner image to full-width responsive `<img width="100%">` matching `pi-jev-eye`.
+- Updated `pi.image` manifest URL to `assets/banner.webp`.
 - Registered `CHANGELOG.md` and `LICENSE` in `package.json` `"files"` packaging list.
 
 ### Fixed

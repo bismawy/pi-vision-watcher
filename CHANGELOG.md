@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `package.json` `description` now leads with the README tagline ("Intelligent vision watcher. Connected models. Zero workflow interruption.") followed by the capability summary, per the `/arnative-pi` manifest standard — pi.dev/packages renders this field verbatim as the package card description.
+
 ## [1.0.15] - 2026-09-28
 
 ### Added

@@ -1,7 +1,7 @@
 {
   "name": "@bismawy/pi-vision-watcher",
   "version": "1.0.15",
-  "description": "Intelligent vision watcher for Pi: describe images with connected vision models, resilient failover chains, and zero interruption to text-only coding workflows.",
+  "description": "Intelligent vision watcher. Connected models. Zero workflow interruption. Text-only Pi models get background image descriptions with failover chains.",
   "type": "module",
   "author": "bismawy",
   "license": "MIT",

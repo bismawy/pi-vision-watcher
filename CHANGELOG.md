@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.1.0] - 2026-10-05
+
+### Changed
+- **Breaking:** rebind four picker chords that collided with OS, terminal, readline and Pi
+  shortcuts. VTE (GNOME Terminal) closes the window on `ctrl+shift+q`, and POSIX tty flow
+  control swallows `ctrl+q`, so the previous bindings were unusable or destructive on Linux:
+  - `ctrl+q` → `ctrl+enter` (failover chain toggle)
+  - `ctrl+shift+q` → `ctrl+shift+r` (reset failover chain)
+  - `ctrl+a` → `alt+a` · `ctrl+alt+a` (async paste handoff)
+  - `ctrl+t` → `ctrl+shift+t` (thinking ladder)
+- Vision and failover markers now use single-cell glyphs (`✦`, `⇆`) instead of emoji, which
+  are double-width and broke column alignment. The symbols in the detail pane carry the same
+  colour as the badges they explain.
+- Detail pane labels read `Vision-capable ✦ :` / `Fallback ⇆ :` and the async row prints its
+  own chord beside the state.
+- `package.json` `description` now leads with the README tagline, per the `/arnative-pi`
+  manifest standard — `pi.dev/packages` renders this field verbatim as the package card
+  description. (Previously staged as `[Unreleased]` in PR #1.)
+
+### Added
+- `alt+↑` / `alt+↓` reorder the highlighted model; the failover chain follows list order and
+  the `None` row stays pinned first.
+
+### Fixed
+- Pressing `enter` while a filter was active silently saved the previously selected primary,
+  which the user could not see in the filtered list. `enter` now adopts the highlighted match.
+- Removed the `f2` binding from the README; it was documented but never implemented.
+
+### Notes
+- The three `ctrl+` chords are no-ops on legacy terminals that do not speak the Kitty Keyboard
+  Protocol (no wrong action fires). They work on Windows Terminal/conhost, X11, macOS, tmux
+  and SSH.
+- `ctrl+alt+a` is the international-layout-safe half of the async chord, where AltGr occupies
+  `alt+a`.
+
+---
+
 ## [1.0.15] - 2026-09-28
 
 ### Added

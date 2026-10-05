@@ -425,7 +425,7 @@ export default function (pi: ExtensionAPI) {
     const count = details?.imageCount ?? 1;
     const label = `Vision handoff · ${count} pasted image${count === 1 ? "" : "s"}`;
     const hint = expanded ? "Ctrl+O to collapse" : "Ctrl+O to expand";
-    const summary = theme.fg("dim", `👀 ${label} · ${hint}`);
+    const summary = theme.fg("dim", `✦ ${label} · ${hint}`);
     if (!expanded) return new Text(summary, 0, 0);
     // Apply the dim (grey) style per line: the TUI appends a full SGR reset at
     // the end of each rendered line, so a single style wrapper would only tint
@@ -1264,8 +1264,8 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
     : "thinking off";
   const fallbackModels = result.fallbackModels ?? config.fallbackModels;
   const fallbackNote = fallbackModels.length
-    ? ` · 🔁 fallbacks: ${fallbackModels.join(" → ")}`
-    : " · 🔁 no fallbacks";
+    ? ` · ⇆ fallbacks: ${fallbackModels.join(" → ")}`
+    : " · ⇆ no fallbacks";
   updateConfig(
     ctx,
     (c) => ({ ...c, visionModel: ref, thinking, thinkingLevel, asyncClipboardHandoff, fallbackModels }),

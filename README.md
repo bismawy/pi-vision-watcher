@@ -36,16 +36,18 @@ pi --extension ./vision-watcher.ts
 | Key | Action |
 | --- | --- |
 | `space` | Toggle highlighted model as primary describer |
-| `ctrl+q` · `f2` | Toggle highlighted model in/out of failover chain (marked 🔗, max 3) |
-| `ctrl+shift+q` | Reset failover chain |
-| `ctrl+t` | Walk thinking ladder (`off` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max`) |
-| `ctrl+a` | Toggle async paste handoff |
+| `ctrl+enter` | Toggle highlighted model in/out of failover chain (marked ⇆, max 3) |
+| `ctrl+shift+r` | Reset failover chain |
+| `alt+↑` · `alt+↓` | Reorder the highlighted model (the chain follows list order) |
+| `ctrl+shift+t` | Walk thinking ladder (`off` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max`) |
+| `ctrl+alt+a` | Toggle async paste handoff (`alt+a` also works on Windows/macOS) |
 | `enter` · `ctrl+s` | Save configuration (primary describer and chain) |
 | `esc` | Cancel and exit picker |
 
 > **Notes:**
-> - In filter mode, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable.
+> - In filter mode, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable; press `enter` to adopt the highlighted match as the primary describer.
 > - The detail pane renders live preview updates before saving.
+> - Chords are chosen to avoid POSIX tty flow control (`ctrl+s`/`ctrl+q`), VTE's window-level `ctrl+shift+q`, readline keys (`ctrl+a`/`ctrl+t`) and pi's own bindings. `ctrl+enter` works on Windows Terminal/conhost, X11, macOS, tmux and SSH. `ctrl+alt+a` is the safe half of the async chord on international layouts, where AltGr occupies `alt+a`.
 
 ## Commands
 
@@ -88,7 +90,7 @@ pi --extension ./vision-watcher.ts
 
 Most fields have sane defaults — `visionModel` is the only one you normally set.
 
-`fallbackModels` is the failover chain: when the primary describer fails (timeout, rate limit, auth), each entry is tried **in order** until one returns a description. The picker caps the chain at 3 entries (`ctrl+q`). Set it from the picker instead of hand-editing the file.
+`fallbackModels` is the failover chain: when the primary describer fails (timeout, rate limit, auth), each entry is tried **in order** until one returns a description. The picker caps the chain at 3 entries (`ctrl+enter`). Set it from the picker instead of hand-editing the file.
 
 </details>
 

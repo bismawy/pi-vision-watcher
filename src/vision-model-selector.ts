@@ -3,13 +3,14 @@
  * describes images during vision handoff.
  *
  * Uses the same patterns as pi's built-in selectors and pi-hide-providers:
- * - Lists connected (authenticated) models, vision-capable ones first (👀 badge)
+ * - Lists connected (authenticated) models, vision-capable ones first (✦ badge)
  * - A leading "None" row clears the configured vision model
  * - Space selects the highlighted model as the primary describer (toggle)
- * - Ctrl+Alt+F toggles the highlighted model in/out of the failover chain (max 3)
- * - Ctrl+T walks the thinking ladder, Ctrl+A toggles async paste handoff
+ * - Ctrl+Enter toggles the highlighted model in/out of the failover chain (max 3)
+ * - Ctrl+Shift+R clears the failover chain, Ctrl+Shift+T walks the thinking ladder,
+ *   Alt+A / Ctrl+Alt+A toggles async paste handoff, Alt+↑↓ reorders rows
  * - Enter or Ctrl+S saves, Esc / Ctrl+C cancels
- * - The primary is marked ✓, chain members 🔁
+ * - The primary is marked ✓, chain members ⇆
  */
 
 import {
@@ -25,7 +26,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { DynamicBorder, keyText } from "@earendil-works/pi-coding-agent";
 import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
@@ -34,14 +35,28 @@ import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
  *  fourth describer would ever be reached. */
 export const MAX_FALLBACKS = 3;
 
-/** Key that toggles failover-chain membership, and the hint shown for it.
+/** Key that toggles failover-chain membership.
  *
- *  Deliberately a single control byte nobody else wants: `ctrl+alt+f` never
- *  survives Windows conhost/Windows Terminal (AltGr handling drops or downgrades
- *  it), `alt+f` is pi's editor word-right, and `ctrl+f` is pi's find-text. */
-const FALLBACK_KEY = Key.ctrl("q");
-const FALLBACK_KEY_HINT = "ctrl+q";
-const RESET_FALLBACKS_KEY = Key.ctrlShift("q");
+ *  `ctrl+enter` is the one chord that survives Windows conhost/Windows Terminal,
+ *  Linux/X11, macOS, tmux and SSH alike. The previous binding was `ctrl+q`, which
+ *  collides with POSIX tty flow control (IXON: ctrl+s freezes / ctrl+q resumes
+ *  output before the app sees it), with pi's own `app.message.followUp`, and —
+ *  for the reset chord — with VTE's window-level "close terminal" accelerator.
+ *
+ *  Reset uses `ctrl+shift+r` because R reads as Reset. It is unbound in every
+ *  default terminal (VTE, Konsole, Windows Terminal, iTerm2 — kitty is the lone
+ *  exception, where it resizes a window) and unbound anywhere in pi. On legacy
+ *  7-bit terminals it degrades to plain `ctrl+r`, which the app does not use, so
+ *  the worst case is a no-op rather than a wrong action. The old `ctrl+shift+q`
+ *  was impossible to type on those terminals: both it and `ctrl+q` emit 0x11. */
+const FALLBACK_KEY = Key.ctrl("enter");
+const FALLBACK_KEY_HINT = "ctrl+enter";
+const REORDER_UP_KEY = Key.alt("up");
+const REORDER_DOWN_KEY = Key.alt("down");
+/** Hint printed next to the async toggle in the detail pane (and the legend).
+ *  `ctrl+alt+a` is the Linux-safe half: AltGr occupies alt+a on intl layouts
+ *  (`@`, `ł`), so the selector accepts both chords. */
+const ASYNC_KEY_HINT = "[Ctrl+alt+a]";
 
 /** Provider ids that don't title-case cleanly. Everything else falls back to
  *  word-capitalisation (`custom-openrouter-ai` → "Custom Openrouter AI"). */
@@ -233,7 +248,27 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
+    // Reorder the highlighted model inside the list. The failover chain is
+    // tried in list order, so moving a row is how you change which fallback
+    // runs first. Only meaningful on the unfiltered list (the filter is a
+    // view, not an ordering); skip edits that would cross the pinned None row.
+    if (matchesKey(data, REORDER_UP_KEY) || matchesKey(data, REORDER_DOWN_KEY)) {
+      if (this.searchInput.getValue()) return;
+      const item = this.filteredItems[this.selectedIndex];
+      if (item?.ref) this.moveItem(item.ref, matchesKey(data, REORDER_DOWN_KEY) ? 1 : -1);
+      return;
+    }
+
+    // Confirming saves the configuration. When a filter query is typed, Enter
+    // ALSO adopts the highlighted model as the primary describer — the search
+    // field has already consumed every `space`, so without this the highlighted
+    // model could never be picked while filtering and the stale primary would
+    // be saved silently.
     if (kb.matches(data, "tui.select.confirm") || matchesKey(data, Key.ctrl("s"))) {
+      if (this.searchInput.getValue()) {
+        const item = this.filteredItems[this.selectedIndex];
+        if (item) this.selectPrimary(item.ref);
+      }
       this.save();
       return;
     }
@@ -268,7 +303,7 @@ export class VisionModelSelectorComponent implements Component {
     // chosen together. Intercepted before the search input (like the other ctrl
     // shortcuts) so the key never lands in the filter text. See
     // {@link FALLBACK_KEY} for why it isn't ctrl+f.
-    if (matchesKey(data, RESET_FALLBACKS_KEY)) {
+    if (matchesKey(data, "ctrl+shift+r")) {
       this.clearFallbacks();
       return;
     }
@@ -279,7 +314,11 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
-    if (matchesKey(data, Key.ctrl("a"))) {
+    // alt+a on Windows/macOS, ctrl+alt+a on Linux where AltGr takes alt+a
+    // (intl layouts: `@`, `ł`). `ctrl+a` is the editor's cursorLineStart (Home)
+    // and GNU Screen / tmux's command prefix, so it cannot be repurposed here.
+    // Intercepted before the search input so it never lands in the filter text.
+    if (matchesKey(data, Key.alt("a")) || matchesKey(data, Key.ctrlAlt("a"))) {
       this.asyncClipboardHandoff = !this.asyncClipboardHandoff;
       this.updateList();
       return;
@@ -288,7 +327,9 @@ export class VisionModelSelectorComponent implements Component {
     // ctrl+t walks the whole thinking ladder (off → minimal → … → max → off) so
     // one key covers on/off *and* effort — no separate shift+tab binding.
     // Intercepted before the search input so it never lands in the filter text.
-    if (kb.matches(data, "app.thinking.toggle") || matchesKey(data, Key.ctrl("t"))) {
+    // `ctrl+t` is readline transpose-chars and pi's app.thinking.toggle (tool
+    // output); the ladder gets its own chord instead so both stay usable.
+    if (matchesKey(data, Key.ctrlShift("t"))) {
       this.cycleThinking();
       this.updateList();
       return;
@@ -356,19 +397,33 @@ export class VisionModelSelectorComponent implements Component {
 
     // One legend line: the count carries the accent colour so it is the first
     // thing the eye lands on, while the keys stay dim so they do not compete
-    // with the picker itself. ctrl+a toggles the async clipboard handoff; it
-    // is deliberately left out so this line stays readable at 80 columns.
+    // with the picker itself. The chords need roughly 120 columns, which wraps
+    // gracefully; the async and reorder keys are hinted beside the state they
+    // toggle (and in the README) instead of bloating this strip.
     const confirm = keyText("tui.select.confirm");
     const legend = [
       `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Done`,
       "[Space] Vision",
-      "[Ctrl+q] Fallback",
-      "[Ctrl+Shift+q] Reset",
-      "[Ctrl+t] Think",
+      "[Ctrl+enter] Fallback",
+      "[Ctrl+shift+r] Reset",
+      "[Ctrl+shift+t] Think",
       "[Esc] Cancel",
     ].join("  ");
 
     return `${this.theme.fg("dim", "  ")}${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${legend}`)}`;
+  }
+
+  /** Move `ref` one row up/down in the display list. The None row is pinned at
+   *  index 0; no move may cross it or run off either end. */
+  private moveItem(ref: string, delta: number): void {
+    const from = this.allItems.findIndex((i) => i.ref === ref);
+    const to = from + delta;
+    if (from <= 0 || to <= 0 || to >= this.allItems.length) return;
+    const [item] = this.allItems.splice(from, 1);
+    this.allItems.splice(to, 0, item!);
+    this.filteredItems = this.allItems;
+    this.selectedIndex = to;
+    this.updateList();
   }
 
   private clearFallbacks(): void {
@@ -461,7 +516,7 @@ export class VisionModelSelectorComponent implements Component {
         const labelled = isSelected
           ? this.theme.fg("accent", item.modelId)
           : item.modelId;
-        const badge = item.vision ? this.theme.fg("success", " 👀") : this.theme.fg("muted", " ·");
+        const badge = item.vision ? this.theme.fg("success", " ✦") : this.theme.fg("muted", " ·");
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
         label = `${labelled}${providerBadge}${badge}`;
       }
@@ -476,7 +531,7 @@ export class VisionModelSelectorComponent implements Component {
       // chain behind it).
       const fallbackMark =
         item.ref && this.fallbacks.has(item.ref)
-          ? this.theme.fg("warning", " 🔁")
+          ? this.theme.fg("warning", " ⇆")
           : "";
 
       this.listContainer.addChild(new Text(`${prefix}${label}${current}${fallbackMark}`, 0, 0));
@@ -512,7 +567,7 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   /** The detail pane summarises the *configuration* (primary, failover chain
-   *  and toggles) rather than the highlighted row, so each space / ctrl+q
+   *  and toggles) rather than the highlighted row, so each space / ctrl+enter
    *  press shows exactly what will be saved.
    *
    *  Built per frame rather than cached in a child component because the
@@ -521,13 +576,21 @@ export class VisionModelSelectorComponent implements Component {
   private detailLines(width: number): string[] {
     const out: string[] = [];
 
-    const line = (label: string, value: string) => {
-      const indent = " ".repeat(2 + visibleWidth(label));
+    // The label — including the symbol, when it has one — wears the same
+    // colour as the badge/marker it explains, so the two read as one legend
+    // instead of as prose that happens to contain a glyph. The space before
+    // `:` keeps the dim label and the symbol grid aligned with the labels
+    // below (`Thinking:`, `Async …:`) which have no symbol.
+    const label = (text: string, symbol: string, color: ThemeColor) =>
+      `${this.theme.fg("dim", `  ${text} `)}${this.theme.fg(color, symbol)}${this.theme.fg("dim", " : ")}`;
+
+    const value = (labelText: string, text: string) => {
+      const indent = " ".repeat(2 + visibleWidth(labelText));
       const wrapped = wrapTextWithAnsi(
-        value,
+        text,
         Math.max(8, width - visibleWidth(indent)),
       );
-      out.push(`${this.theme.fg("dim", `  ${label}`)}${wrapped[0] ?? ""}`);
+      out.push(`${labelText}${wrapped[0] ?? ""}`);
       for (const extra of wrapped.slice(1)) out.push(indent + extra);
     };
 
@@ -540,33 +603,34 @@ export class VisionModelSelectorComponent implements Component {
       );
     };
 
-    line(
-      "Vision-capable (👀): ",
+    value(
+      label("Vision-capable", "✦", "success"),
       this.currentRef
         ? this.refLabel(this.currentRef)
-        : this.theme.fg("muted", "none — vision handoff disabled"),
+        : this.theme.fg("muted", "none — vision watcher disabled"),
     );
 
     const chain = this.orderedFallbacks();
-    line(
-      "Fallback (🔁): ",
+    value(
+      label("Fallback", "⇆", "warning"),
       chain.length
         ? `${this.theme.fg("success", "on")} - ${chain.map((r) => this.refLabel(r)).join(", ")}`
         : this.theme.fg("muted", "off"),
     );
 
-    line(
-      "Thinking: ",
+    value(
+      this.theme.fg("dim", "  Thinking: "),
       this.thinking
         ? this.theme.fg("success", `on (${this.thinkingLevel})`)
         : this.theme.fg("muted", "off"),
     );
 
-    line(
-      "Async pasted-path fallback: ",
-      this.asyncClipboardHandoff
-        ? this.theme.fg("success", "on")
-        : this.theme.fg("muted", "off"),
+    value(
+      this.theme.fg("dim", "  Async pasted-path fallback: "),
+      `${this.theme.fg(
+        this.asyncClipboardHandoff ? "success" : "muted",
+        this.asyncClipboardHandoff ? "on" : "off",
+      )}${this.theme.fg("dim", `  ${ASYNC_KEY_HINT}`)}`,
     );
 
     // The warning follows the *highlighted* row: it answers "what happens if I

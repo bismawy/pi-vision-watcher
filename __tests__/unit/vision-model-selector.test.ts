@@ -23,9 +23,9 @@ const models = ["a", "b", "c", "d"].map((id) => ({
 const DOWN = "\x1b[B";
 const ENTER = "\r";
 const SPACE = " ";
-const CTRL_ENTER = "\x1b[13;5u";
+const TAB = "\t";
 const CTRL_SHIFT_R = "\x1b[114;6u";
-const CTRL_SHIFT_T = "\x1b[116;6u";
+const SHIFT_TAB = "\x1b[Z";
 const ALT_UP = "\x1b[1;3A";
 const ALT_DOWN = "\x1b[1;3B";
 const ALT_A = "\x1ba";
@@ -105,14 +105,14 @@ describe("VisionModelSelectorComponent", () => {
     expect(done.mock.calls[0][0].ref).toBe("p/b");
   });
 
-  it("adds chain members with ctrl+enter and caps the chain", () => {
+  it("adds chain members with tab and caps the chain", () => {
     const { component, done, text } = build({ currentRef: "p/a" });
     for (let i = 0; i < MAX_FALLBACKS; i++) {
-      component.handleInput(CTRL_ENTER);
+      component.handleInput(TAB);
       component.handleInput(DOWN);
     }
     // One more than the cap — refused, with a hint.
-    component.handleInput(CTRL_ENTER);
+    component.handleInput(TAB);
     expect(text()).toContain(`max ${MAX_FALLBACKS} fallbacks`);
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].fallbackModels).toEqual(["p/a", "p/b", "p/c"]);
@@ -129,7 +129,7 @@ describe("VisionModelSelectorComponent", () => {
 
   it("toggles a chain member back out", () => {
     const { component, done } = build({ currentRef: "p/a", fallbacks: ["p/a", "p/b"] });
-    component.handleInput(CTRL_ENTER); // drop p/a
+    component.handleInput(TAB); // drop p/a
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].fallbackModels).toEqual(["p/b"]);
   });
@@ -179,11 +179,11 @@ describe("VisionModelSelectorComponent", () => {
     // widths, which collapses the double spaces between legend entries.
     const flat = text().replace(/^│ | +│$/gm, "").replace(/\s+/g, " ");
     expect(flat).toContain(
-      "4 models · [Enter] Done [Space] Vision [Ctrl+enter] Fallback [Ctrl+shift+r] Reset [Ctrl+shift+t] Think [Esc] Cancel",
+      "4 models · [Enter] Done [Space] Vision [Tab] Fallback [Ctrl+shift+r] Reset [Shift+tab] Think [Esc] Cancel",
     );
   });
 
-  it("walks the thinking ladder with ctrl+shift+t and wraps without sticking", () => {
+  it("walks the thinking ladder with shift+tab and wraps without sticking", () => {
     const { component, text } = build({ level: "medium" });
     const thinking = () => /Thinking: (on \(\w+\)|off)/.exec(text())?.[1];
     expect(thinking()).toBe("off");
@@ -199,16 +199,29 @@ describe("VisionModelSelectorComponent", () => {
       "off",
       "on (minimal)",
     ]) {
-      component.handleInput(CTRL_SHIFT_T);
+      component.handleInput(SHIFT_TAB);
       expect(thinking()).toBe(expected);
     }
   });
 
-  it("toggles the chain with ctrl+enter", () => {
+  it("toggles the chain with tab", () => {
     const { component, done } = build({ currentRef: "p/a" });
-    component.handleInput(CTRL_ENTER);
+    component.handleInput(TAB);
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].fallbackModels).toEqual(["p/a"]);
+  });
+
+  it("ignores ctrl+enter now that tab owns the chain", () => {
+    const { component, done } = build({ currentRef: "p/a" });
+    component.handleInput("\x1b[13;5u");
+    component.handleInput(ENTER);
+    expect(done.mock.calls[0][0].fallbackModels).toEqual([]);
+  });
+
+  it("ignores ctrl+shift+t now that shift+tab owns the thinking ladder", () => {
+    const { component, text } = build({ level: "medium" });
+    component.handleInput("\x1b[116;6u");
+    expect(/Thinking: (on \(\w+\)|off)/.exec(text())?.[1]).toBe("off");
   });
 
   it("toggles async paste handoff with alt+a and ctrl+alt+a", () => {

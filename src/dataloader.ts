@@ -38,7 +38,7 @@ import {
   type VisionHandoffConfig,
 } from "./index.js";
 import { imageHash } from "./image.js";
-import { runBatch, describeSingle, type DescriberDeps } from "./describer.js";
+import { runBatch, type DescriberDeps } from "./describer.js";
 
 /** Resolved when a description couldn't be obtained (graceful degradation).
  *  Failures are NOT cached, so the next turn re-attempts. */

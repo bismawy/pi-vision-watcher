@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-21
+
 ### Changed
 - **Breaking:** the thinking ladder moves from `ctrl+shift+t` to `shift+tab`. `ctrl+shift+t` opens a new tab in Windows
   Terminal and GNOME Terminal and is Pi's `app.session.tree`; `shift+tab` is one sequence (`ESC [ Z`) on every terminal and

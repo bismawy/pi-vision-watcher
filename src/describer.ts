@@ -217,176 +217,72 @@ export async function runBatch(
   turnSignal?: AbortSignal,
 ): Promise<BatchResult> {
   const out: BatchResult = new Map();
-  deps.setAttemptedModel?.(formatModelRef(visionModel.provider, visionModel.id));
-  const auth = await modelRegistry.getApiKeyAndHeaders(visionModel);
-  if (!auth.ok || !auth.apiKey) {
-    const reason = !auth.ok
-      ? auth.error
-      : `No API key for vision model "${formatModelRef(visionModel.provider, visionModel.id)}"`;
-    deps.setLastError(reason);
-    appendVisionError({
-      phase: "batch",
-      reason,
-      visionModel: cfg.visionModel,
-      attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-      imageHashes: misses.map((m) => m.hash),
-      imageCount: misses.length,
-      config: configSnapshot(cfg),
-    });
-    return out;
+  // Parse and fallback run inside callVision's try so a throw there is logged as
+  // a batch failure and the partially filled map is still returned.
+  await callVision(
+    misses.map((m) => m.img),
+    misses.map((m) => m.hash),
+    "batch",
+    userPrompt,
+    visionModel,
+    modelRegistry,
+    cfg,
+    deps,
+    (text, truncated) => fillBatch(out, text, truncated, misses, userPrompt, visionModel, modelRegistry, cfg, deps, turnSignal),
+    turnSignal,
+  );
+  return out;
+}
+
+async function fillBatch(
+  out: BatchResult,
+  text: string,
+  truncated: boolean,
+  misses: { img: ExtractedImage; hash: string }[],
+  userPrompt: string,
+  visionModel: Model<Api>,
+  modelRegistry: ModelRegistry,
+  cfg: VisionHandoffConfig,
+  deps: DescriberDeps,
+  turnSignal?: AbortSignal,
+): Promise<void> {
+  const parsed = parseBatchedDescriptions(text, misses.length);
+  for (let i = 0; i < misses.length; i++) {
+    const d = parsed[i];
+    if (d) out.set(misses[i].hash, d);
   }
-
-  const prefix = cfg.userPromptPrefix ?? DEFAULT_USER_PROMPT_PREFIX;
-  const systemPrompt = cfg.prompt ?? DEFAULT_VISION_PROMPT;
-  const content: (TextContent | ImageContent)[] = [
-    { type: "text", text: batchUserPrompt(misses.length, userPrompt, prefix) },
-    ...misses.map((m) => ({ type: "image", data: m.img.data, mimeType: m.img.mimeType } satisfies ImageContent)),
-  ];
-  const userMessage: Message = { role: "user", content, timestamp: Date.now() };
-
-  const timeoutMs = describeTimeoutMs(misses.length, cfg.describeTimeoutMs);
-  const maxTokens = resolveMaxTokens(cfg, visionModel);
-  const reasoning = resolveReasoning(cfg, visionModel);
-  const controller = new AbortController();
-  let timedOut = false;
-  using fetchGuard = fetchInterceptorGuard();
-  using timer = timeoutGuard(timeoutMs, () => {
-    timedOut = true;
-    controller.abort();
-  });
-  using abortWire = abortWireGuard(turnSignal, controller);
-
-  const describeCtx: DescribeContext = { energyReader: undefined };
-  try {
-    const response = await describeAls.run(describeCtx, async () =>
-      completeVisionModel(
-        visionModel,
-        modelRegistry,
-        { systemPrompt, messages: [userMessage] },
-        { apiKey: auth.apiKey, headers: auth.headers, signal: controller.signal, maxTokens, reasoning },
-      ),
+  // stopReason length = the batch response was cut off mid-stream. Only the
+  // highest-index parsed section can be partial (earlier ones ended with their
+  // END marker), so mark that one. It is NOT re-described: a single call for
+  // the same complex image would likely hit the same limit.
+  if (truncated) {
+    for (let i = misses.length - 1; i >= 0; i--) {
+      const h = misses[i].hash;
+      const d = out.get(h);
+      if (d) {
+        out.set(h, markDescriptionTruncated(d));
+        break;
+      }
+    }
+  }
+  // A failed delimiter-parse is a failed batching, not a failed description:
+  // describe each unparsed image with its own single-image call, in parallel.
+  const unparsed = misses.filter((m) => !out.has(m.hash));
+  if (unparsed.length > 0) {
+    const fallbacks = await Promise.all(
+      unparsed.map((m) => describeSingle(m.img, userPrompt, visionModel, modelRegistry, cfg, deps, turnSignal)),
     );
-    const capture = await readCapture(describeCtx);
-    const hashes = misses.map((m) => m.hash);
-    const record = buildUsageRecord(response, capture, visionModel, hashes[0], hashes.length > 1 ? hashes : undefined);
-    if (record) deps.reportUsage(record);
-    if (response.stopReason === "aborted" || response.stopReason === "error") {
-      const reason = setStopReasonError(
-        deps,
-        response.stopReason,
-        response.errorMessage,
-        abortWire,
-        timedOut,
-        timeoutMs,
-      );
-      if (reason) {
-        appendVisionError({
-          phase: "batch",
-          reason,
-          visionModel: cfg.visionModel,
-          attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-          imageHashes: hashes,
-          imageCount: misses.length,
-          stopReason: response.stopReason,
-          timedOut,
-          timeoutMs,
-          errorMessage: response.errorMessage,
-          config: configSnapshot(cfg),
-        });
-      }
-      return out;
+    for (let i = 0; i < unparsed.length; i++) {
+      const d = fallbacks[i];
+      if (d) out.set(unparsed[i].hash, d);
     }
-    const text = response.content
-      .filter((c): c is TextContent => c.type === "text")
-      .map((c) => c.text)
-      .join("\n")
-      .trim();
-    if (!text) {
-      deps.setLastError("vision model returned an empty description");
-      appendVisionError({
-        phase: "batch",
-        reason: "vision model returned an empty description",
-        visionModel: cfg.visionModel,
-        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-        imageHashes: hashes,
-        imageCount: misses.length,
-        config: configSnapshot(cfg),
-      });
-      return out;
-    }
-    const parsed = parseBatchedDescriptions(text, misses.length);
-    for (let i = 0; i < misses.length; i++) {
-      const d = parsed[i];
-      if (d) out.set(misses[i].hash, d);
-    }
-    // stopReason "length" = the batch response was cut off mid-stream. The last
-    // image being emitted when the cap hit is the one whose section is truncated
-    // (parseBatchedDescriptions still captures it via the end-of-text lookahead,
-    // just with partial content). Mark that one — the highest-index parsed slot —
-    // so the agent/user know it's incomplete. Earlier sections had `<<<END>>>`
-    // markers and are complete. We deliberately do NOT re-describe the truncated
-    // image: a single call for the same complex image would likely hit the same
-    // limit, so the partial text + marker is the honest, no-wasted-call result.
-    if (response.stopReason === "length") {
-      for (let i = misses.length - 1; i >= 0; i--) {
-        const h = misses[i].hash;
-        if (out.has(h)) {
-          out.set(h, markDescriptionTruncated(out.get(h)!));
-          break;
-        }
-      }
-    }
-    // Fallback: a failed delimiter-parse is NOT a failed description — it's a
-    // failed batching. Describe each unparsed image with its own single-image
-    // call (no delimiters to cooperate with). The calls run in parallel so
-    // their results still arrive together, not sequentially.
-    const unparsed = misses.filter((m) => !out.has(m.hash));
-    if (unparsed.length > 0) {
-      const fallbacks = await Promise.all(
-        unparsed.map((m) => describeSingle(m.img, userPrompt, visionModel, modelRegistry, cfg, deps, turnSignal)),
-      );
-      for (let i = 0; i < unparsed.length; i++) {
-        if (fallbacks[i]) out.set(unparsed[i].hash, fallbacks[i]!);
-      }
-    }
-    return out;
-  } catch (err) {
-    const userAborted = abortWire.userAborted();
-    const reason = timedOut
-      ? `describer timed out after ${timeoutMs / 1000}s`
-      : err instanceof Error
-        ? err.message
-        : String(err);
-    deps.setLastError(reason);
-    // A deliberate user cancel isn't a troubleshooting-worthy error — skip
-    // logging it (mirroring the no-warn-on-user-abort contract).
-    if (!userAborted) {
-      appendVisionError({
-        phase: "batch",
-        reason,
-        visionModel: cfg.visionModel,
-        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-        imageHashes: misses.map((m) => m.hash),
-        imageCount: misses.length,
-        timedOut,
-        timeoutMs,
-        errorStack: err instanceof Error ? err.stack : undefined,
-        config: configSnapshot(cfg),
-      });
-    }
-    return out;
-  } finally {
-    // The `using` guards above already released the fetch interceptor, timer,
-    // and abort wire. Only the energy tee needs an explicit unhandled-rejection
-    // swallow: if the main stream aborted, the tee rejects too.
-    describeCtx.energyReader?.catch(() => {});
   }
 }
 
-/** Describe a single image with one `completeSimple()` call and return the RAW
- *  description (no envelope, no truncation). Returns null on any genuine
- *  failure (auth, abort/error, empty) so the caller only caches `UNAVAILABLE`
- *  when a real describer attempt failed. */
+// Describe a single image with one completeSimple() call and return the RAW
+// description (no envelope). Returns null on any genuine failure (auth,
+// abort/error, empty) so the caller only caches UNAVAILABLE when a real
+// describer attempt failed.
 export async function describeSingle(
   img: ExtractedImage,
   userPrompt: string,
@@ -396,32 +292,58 @@ export async function describeSingle(
   deps: DescriberDeps,
   turnSignal?: AbortSignal,
 ): Promise<string | null> {
-  deps.setAttemptedModel?.(formatModelRef(visionModel.provider, visionModel.id));
+  // stopReason length = token limit hit before the model finished. The partial
+  // text is still useful but must not pass as complete.
+  return callVision(
+    [img],
+    [imageHash(img.mimeType, img.data)],
+    "single",
+    userPrompt,
+    visionModel,
+    modelRegistry,
+    cfg,
+    deps,
+    (text, truncated) => (truncated ? markDescriptionTruncated(text) : text),
+    turnSignal,
+  );
+}
+
+// One vision-model call shared by runBatch and describeSingle: auth, abort and
+// timeout guards, usage reporting, and failure logging. Returns null on any
+// genuine failure (auth, abort/error, empty, throw) after deps.setLastError
+// records the reason; a user cancel stays silent.
+async function callVision<T>(
+  images: ExtractedImage[],
+  hashes: string[],
+  phase: "batch" | "single",
+  userPrompt: string,
+  visionModel: Model<Api>,
+  modelRegistry: ModelRegistry,
+  cfg: VisionHandoffConfig,
+  deps: DescriberDeps,
+  finish: (text: string, truncated: boolean) => T | Promise<T>,
+  turnSignal?: AbortSignal,
+): Promise<T | null> {
+  const attemptedModel = formatModelRef(visionModel.provider, visionModel.id);
+  deps.setAttemptedModel?.(attemptedModel);
+  const n = images.length;
+  const base = { phase, visionModel: cfg.visionModel, attemptedModel, imageHashes: hashes, imageCount: n };
   const auth = await modelRegistry.getApiKeyAndHeaders(visionModel);
   if (!auth.ok || !auth.apiKey) {
-    const reason = !auth.ok
-      ? auth.error
-      : `No API key for vision model "${formatModelRef(visionModel.provider, visionModel.id)}"`;
+    const reason = !auth.ok ? auth.error : 'No API key for vision model "' + attemptedModel + '"';
     deps.setLastError(reason);
-    appendVisionError({
-      phase: "single",
-      reason,
-      visionModel: cfg.visionModel,
-      attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-      imageHashes: [imageHash(img.mimeType, img.data)],
-      imageCount: 1,
-      config: configSnapshot(cfg),
-    });
+    appendVisionError({ ...base, reason, config: configSnapshot(cfg) });
     return null;
   }
+
   const prefix = cfg.userPromptPrefix ?? DEFAULT_USER_PROMPT_PREFIX;
   const systemPrompt = cfg.prompt ?? DEFAULT_VISION_PROMPT;
   const content: (TextContent | ImageContent)[] = [
-    { type: "text", text: batchUserPrompt(1, userPrompt, prefix) },
-    { type: "image", data: img.data, mimeType: img.mimeType } satisfies ImageContent,
+    { type: "text", text: batchUserPrompt(n, userPrompt, prefix) },
+    ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType } satisfies ImageContent)),
   ];
   const userMessage: Message = { role: "user", content, timestamp: Date.now() };
-  const timeoutMs = describeTimeoutMs(1, cfg.describeTimeoutMs);
+  const timeoutMs = describeTimeoutMs(n, cfg.describeTimeoutMs);
   const maxTokens = resolveMaxTokens(cfg, visionModel);
   const reasoning = resolveReasoning(cfg, visionModel);
   const controller = new AbortController();
@@ -444,26 +366,14 @@ export async function describeSingle(
       ),
     );
     const capture = await readCapture(describeCtx);
-    const hash = imageHash(img.mimeType, img.data);
-    const record = buildUsageRecord(response, capture, visionModel, hash);
+    const record = buildUsageRecord(response, capture, visionModel, hashes[0], n > 1 ? hashes : undefined);
     if (record) deps.reportUsage(record);
     if (response.stopReason === "aborted" || response.stopReason === "error") {
-      const reason = setStopReasonError(
-        deps,
-        response.stopReason,
-        response.errorMessage,
-        abortWire,
-        timedOut,
-        timeoutMs,
-      );
+      const reason = setStopReasonError(deps, response.stopReason, response.errorMessage, abortWire, timedOut, timeoutMs);
       if (reason) {
         appendVisionError({
-          phase: "single",
+          ...base,
           reason,
-          visionModel: cfg.visionModel,
-          attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-          imageHashes: [hash],
-          imageCount: 1,
           stopReason: response.stopReason,
           timedOut,
           timeoutMs,
@@ -479,40 +389,25 @@ export async function describeSingle(
       .join("\n")
       .trim();
     if (!text) {
-      deps.setLastError("vision model returned an empty description");
-      appendVisionError({
-        phase: "single",
-        reason: "vision model returned an empty description",
-        visionModel: cfg.visionModel,
-        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-        imageHashes: [hash],
-        imageCount: 1,
-        config: configSnapshot(cfg),
-      });
+      const reason = "vision model returned an empty description";
+      deps.setLastError(reason);
+      appendVisionError({ ...base, reason, config: configSnapshot(cfg) });
       return null;
     }
-    // stopReason "length" = the model hit a token limit (configured maxTokens or
-    // the provider's hard output cap) before finishing. The partial text is still
-    // useful, but it must not pass as complete — mark it so the agent/user know.
-    return response.stopReason === "length" ? markDescriptionTruncated(text) : text;
+    return await finish(text, response.stopReason === "length");
   } catch (err) {
     const userAborted = abortWire.userAborted();
     const reason = timedOut
-      ? `describer timed out after ${timeoutMs / 1000}s`
+      ? "describer timed out after " + timeoutMs / 1000 + "s"
       : err instanceof Error
         ? err.message
         : String(err);
     deps.setLastError(reason);
-    // A deliberate user cancel isn't a troubleshooting-worthy error — skip
-    // logging it (mirroring the no-warn-on-user-abort contract).
+    // A deliberate user cancel is not worth logging (no-warn-on-user-abort contract).
     if (!userAborted) {
       appendVisionError({
-        phase: "single",
+        ...base,
         reason,
-        visionModel: cfg.visionModel,
-        attemptedModel: formatModelRef(visionModel.provider, visionModel.id),
-        imageHashes: [imageHash(img.mimeType, img.data)],
-        imageCount: 1,
         timedOut,
         timeoutMs,
         errorStack: err instanceof Error ? err.stack : undefined,
@@ -521,6 +416,9 @@ export async function describeSingle(
     }
     return null;
   } finally {
+    // The using guards release the fetch interceptor, timer, and abort wire.
+    // Only the energy tee needs an explicit swallow: it rejects when the main
+    // stream aborts.
     describeCtx.energyReader?.catch(() => {});
   }
 }

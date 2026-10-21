@@ -141,7 +141,7 @@ describe("VisionModelSelectorComponent", () => {
   });
 
   it("resets all fallbacks with ctrl+shift+r", () => {
-    const { component, done, text } = build({ currentRef: "p/a", fallbacks: ["ghost/model", "p/b", "p/c"] });
+    const { component, done } = build({ currentRef: "p/a", fallbacks: ["ghost/model", "p/b", "p/c"] });
     component.handleInput(CTRL_SHIFT_R);
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].fallbackModels).toEqual([]);

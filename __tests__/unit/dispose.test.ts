@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fetchInterceptorGuard, timeoutGuard, abortWireGuard } from "../../src/dispose.js";
-import { fetchInterceptorRefcount, installFetchInterceptor, uninstallFetchInterceptor } from "../../src/usage.js";
+import { fetchInterceptorRefcount, uninstallFetchInterceptor } from "../../src/usage.js";
 
 describe("fetchInterceptorGuard", () => {
   beforeEach(() => {

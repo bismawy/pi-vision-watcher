@@ -22,6 +22,7 @@
 - The picker detail pane is an arnative status table: `Label · STATUS | detail`, the label column padded so every
   `·` divider sits in one column, one status word per row (`ON`/`OFF`, green when on, grey when off), and long details
   wrap under their own column. The fallback chain shows its order with `→` and its cap as `(max 3)`.
+- The picker legend leads with `[↑↓] Move` so the navigation keys are the first hint on the strip.
 
 ## [1.1.0] - 2026-10-05
 

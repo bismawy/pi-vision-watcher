@@ -35,6 +35,7 @@ pi --extension ./vision-watcher.ts
 
 | Key | Action |
 | --- | --- |
+| `↑` · `↓` | Move the highlight up/down the list |
 | `space` | Toggle highlighted model as primary describer |
 | `tab` | Toggle highlighted model in/out of failover chain (marked ⇆, max 3) |
 | `ctrl+shift+r` | Reset failover chain |

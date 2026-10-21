@@ -179,7 +179,7 @@ describe("VisionModelSelectorComponent", () => {
     // widths, which collapses the double spaces between legend entries.
     const flat = text().replace(/^│ | +│$/gm, "").replace(/\s+/g, " ");
     expect(flat).toContain(
-      "4 models · [Enter] Done [Space] Vision [Tab] Fallback [Ctrl+shift+r] Reset [Shift+tab] Think [Esc] Cancel",
+      "4 models · [↑↓] Move [Enter] Done [Space] Vision [Tab] Fallback [Ctrl+shift+r] Reset [Shift+tab] Think [Esc] Cancel",
     );
   });
 

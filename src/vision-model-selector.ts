@@ -442,11 +442,13 @@ export class VisionModelSelectorComponent implements Component {
 
     // One legend line: the count carries the accent colour so it is the first
     // thing the eye lands on, while the keys stay dim so they do not compete
-    // with the picker itself. The chords need roughly 120 columns, which wraps
-    // gracefully; the async and reorder keys are hinted beside the state they
-    // toggle (and in the README) instead of bloating this strip.
+    // with the picker itself. The chords need roughly 130 columns, which wraps
+    // gracefully; the async chord is hinted beside the state it toggles (and in
+    // the README) instead of bloating this strip. `Move` is the highlight, not
+    // the row: reordering is `alt+↑↓` and lives in the README.
     const confirm = keyText("tui.select.confirm");
     const legend = [
+      "[↑↓] Move",
       `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Done`,
       "[Space] Vision",
       "[Tab] Fallback",

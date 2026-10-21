@@ -621,21 +621,28 @@ export class VisionModelSelectorComponent implements Component {
   private detailLines(width: number): string[] {
     const out: string[] = [];
 
-    // The label — including the symbol, when it has one — wears the same
-    // colour as the badge/marker it explains, so the two read as one legend
-    // instead of as prose that happens to contain a glyph. The space before
-    // `:` keeps the dim label and the symbol grid aligned with the labels
-    // below (`Thinking:`, `Async …:`) which have no symbol.
-    const label = (text: string, symbol: string, color: ThemeColor) =>
-      `${this.theme.fg("dim", `  ${text} `)}${this.theme.fg(color, symbol)}${this.theme.fg("dim", " : ")}`;
+    // Arnative status-panel rows: `Label · STATUS | detail`, the label column
+    // padded to the widest label so every `·` divider sits in one column, one
+    // status word per row (success = on, muted = off). A long detail wraps
+    // under its own value column instead of spilling to column 0.
+    const labels = {
+      vision: "  Vision-capable ✦",
+      fallback: "  Fallback ⇆",
+      thinking: "  Thinking",
+      async: "  Async pasted-path fallback",
+    };
+    const col = Math.max(...Object.values(labels).map((l) => visibleWidth(l)));
 
-    const value = (labelText: string, text: string) => {
-      const indent = " ".repeat(2 + visibleWidth(labelText));
-      const wrapped = wrapTextWithAnsi(
-        text,
-        Math.max(8, width - visibleWidth(indent)),
-      );
-      out.push(`${labelText}${wrapped[0] ?? ""}`);
+    const row = (labelText: string, status: string, color: ThemeColor, detail: string) => {
+      const head =
+        this.theme.fg("dim", labelText) +
+        " ".repeat(col - visibleWidth(labelText)) +
+        this.theme.fg("dim", " · ") +
+        this.theme.fg(color, status);
+      // Continuations clear the " | " separator so they line up with the detail.
+      const indent = " ".repeat(visibleWidth(head) + 3);
+      const wrapped = wrapTextWithAnsi(detail, Math.max(8, width - indent.length));
+      out.push(`${head}${detail ? this.theme.fg("dim", " | ") + (wrapped[0] ?? "") : ""}`);
       for (const extra of wrapped.slice(1)) out.push(indent + extra);
     };
 
@@ -648,34 +655,35 @@ export class VisionModelSelectorComponent implements Component {
       );
     };
 
-    value(
-      label("Vision-capable", "✦", "success"),
+    row(
+      labels.vision,
+      this.currentRef ? "ON" : "OFF",
+      this.currentRef ? "success" : "muted",
       this.currentRef
         ? this.refLabel(this.currentRef)
         : this.theme.fg("muted", "none — vision watcher disabled"),
     );
 
     const chain = this.orderedFallbacks();
-    value(
-      label("Fallback", "⇆", "warning"),
-      chain.length
-        ? `${this.theme.fg("success", "on")} - ${chain.map((r) => this.refLabel(r)).join(", ")}`
-        : this.theme.fg("muted", "off"),
+    row(
+      labels.fallback,
+      chain.length ? "ON" : "OFF",
+      chain.length ? "success" : "muted",
+      chain.length ? `${chain.map((r) => this.refLabel(r)).join(" → ")} (max ${MAX_FALLBACKS})` : "",
     );
 
-    value(
-      this.theme.fg("dim", "  Thinking: "),
-      this.thinking
-        ? this.theme.fg("success", `on (${this.thinkingLevel})`)
-        : this.theme.fg("muted", "off"),
+    row(
+      labels.thinking,
+      this.thinking ? "ON" : "OFF",
+      this.thinking ? "success" : "muted",
+      this.thinking ? this.thinkingLevel : "",
     );
 
-    value(
-      this.theme.fg("dim", "  Async pasted-path fallback: "),
-      `${this.theme.fg(
-        this.asyncClipboardHandoff ? "success" : "muted",
-        this.asyncClipboardHandoff ? "on" : "off",
-      )}${this.theme.fg("dim", `  ${ASYNC_KEY_HINT}`)}`,
+    row(
+      labels.async,
+      this.asyncClipboardHandoff ? "ON" : "OFF",
+      this.asyncClipboardHandoff ? "success" : "muted",
+      ASYNC_KEY_HINT,
     );
 
     // The warning follows the *highlighted* row: it answers "what happens if I

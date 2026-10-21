@@ -28,12 +28,48 @@ import {
 } from "@earendil-works/pi-tui";
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import { DynamicBorder, keyText } from "@earendil-works/pi-coding-agent";
+import { keyText } from "@earendil-works/pi-coding-agent";
 import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
 
 /** Failover chain length cap — three is already far past the point where a
  *  fourth describer would ever be reached. */
 export const MAX_FALLBACKS = 3;
+
+type OklchLike = { kind?: string; l?: number; c?: number; h?: number };
+type ThemeLike = Pick<Theme, "fg" | "bold"> & {
+  colors?: Readonly<Record<string, OklchLike>>;
+  style?(text: string, options: { fg: OklchLike }): string;
+};
+
+// pi >=1.2 rejects custom theme tokens (accentSoft), so the arnative soft tier is
+// derived from an official token with the theme generator's recipe: L 0.82,
+// chroma x 0.18, hue kept. Older runtimes without colors/style keep fallback.
+const SOFT_L = 0.82;
+const SOFT_CHROMA_SCALE = 0.18;
+
+export function softPainter(th: ThemeLike, base: ThemeColor, fallback: ThemeColor): (text: string) => string {
+  const style = th.style?.bind(th);
+  const declared = th.colors?.accentSoft;
+  if (style && declared?.kind === "oklch") return (t) => style(t, { fg: declared });
+  const c = th.colors?.[base];
+  if (style && c?.kind === "oklch") {
+    const fg = { kind: "oklch", l: SOFT_L, c: (c.c ?? 0) * SOFT_CHROMA_SCALE, h: c.h ?? 0 };
+    return (t) => style(t, { fg });
+  }
+  return (t) => th.fg(fallback, t);
+}
+
+export function boxEdge(left: string, right: string, width: number, paint: (s: string) => string): string {
+  return width < 2 ? "" : paint(left + "─".repeat(width - 2) + right);
+}
+
+// Truncate before wrapping so a long row never pushes the right wall out of the frame.
+export function boxRow(content: string, width: number, paint: (s: string) => string): string {
+  if (width < 4) return "";
+  const inner = truncateToWidth(content, width - 4, "");
+  const pad = " ".repeat(Math.max(0, width - 4 - visibleWidth(inner)));
+  return paint("│") + " " + inner + pad + " " + paint("│");
+}
 
 /** Key that toggles failover-chain membership.
  *
@@ -116,6 +152,8 @@ export interface VisionModelSelectorResult {
 }
 
 export class VisionModelSelectorComponent implements Component {
+  /** Session thinking level; the frame follows it like Pi's own editor border. */
+  private readonly borderLevel?: Parameters<Theme["getThinkingBorderColor"]>[0];
   private theme: Theme;
   private done: (result: VisionModelSelectorResult) => void;
 
@@ -160,7 +198,9 @@ export class VisionModelSelectorComponent implements Component {
     currentAsyncClipboardHandoff: boolean,
     done: (result: VisionModelSelectorResult) => void,
     currentFallbacks: string[] = [],
+    borderLevel?: Parameters<Theme["getThinkingBorderColor"]>[0],
   ) {
+    this.borderLevel = borderLevel;
     this.theme = theme;
     this.done = done;
     this.currentRef = currentRef;
@@ -189,15 +229,21 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   render(width: number): string[] {
+    // The user asked for the frame to follow the session thinking level, like Pi's editor border;
+    // the soft tier only applies when no level or no thinking-border API is available.
+    const thinkingBorder = this.borderLevel ? this.theme.getThinkingBorderColor?.(this.borderLevel) : undefined;
+    const border = thinkingBorder ?? softPainter(this.theme, "borderAccent", "accent");
+    const body = this.bodyLines(Math.max(1, width - 4)).flatMap((line) => line.split("\n"));
+    return [
+      boxEdge("╭", "╮", width, border),
+      ...body.map((line) => boxRow(line, width, border)),
+      boxEdge("╰", "╯", width, border),
+    ];
+  }
+
+  private bodyLines(width: number): string[] {
     const lines: string[] = [];
-    lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
-    lines.push(
-      truncateToWidth(
-        this.theme.fg("accent", this.theme.bold("Vision Watcher")),
-        width,
-        "",
-      ),
-    );
+    lines.push(this.theme.fg("accent", this.theme.bold("Vision Watcher")));
     lines.push(
       ...wrapTextWithAnsi(
         this.theme.fg(
@@ -221,8 +267,7 @@ export class VisionModelSelectorComponent implements Component {
     lines.push(...this.detailLines(width));
     lines.push("");
     lines.push(...this.footerText.render(width));
-    lines.push(...new DynamicBorder((s) => this.theme.fg("accent", s)).render(width));
-    return lines.map((line) => truncateToWidth(line, width, ""));
+    return lines;
   }
 
   handleInput(data: string): void {
@@ -514,7 +559,7 @@ export class VisionModelSelectorComponent implements Component {
         label = this.theme.fg("warning", item.modelName);
       } else {
         const labelled = isSelected
-          ? this.theme.fg("accent", item.modelId)
+          ? softPainter(this.theme, "accent", "accent")(this.theme.bold(item.modelId))
           : item.modelId;
         const badge = item.vision ? this.theme.fg("success", " ✦") : this.theme.fg("muted", " ·");
         const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);

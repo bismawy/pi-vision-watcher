@@ -1233,6 +1233,7 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
       config.asyncClipboardHandoff,
       (r) => done(r),
       config.fallbackModels,
+      ctx.thinkingLevel,
     );
     return {
       render(width: number) {

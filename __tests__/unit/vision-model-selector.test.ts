@@ -177,7 +177,7 @@ describe("VisionModelSelectorComponent", () => {
     const { text } = build();
     // Whitespace is flattened: the real renderer wraps this line at narrow
     // widths, which collapses the double spaces between legend entries.
-    const flat = text().replace(/\s+/g, " ");
+    const flat = text().replace(/^│ | +│$/gm, "").replace(/\s+/g, " ");
     expect(flat).toContain(
       "4 models · [Enter] Done [Space] Vision [Ctrl+enter] Fallback [Ctrl+shift+r] Reset [Ctrl+shift+t] Think [Esc] Cancel",
     );
@@ -256,7 +256,7 @@ describe("VisionModelSelectorComponent", () => {
     const field = component.render(100).find((l) => l.includes("filter models"));
     expect(field).toBeDefined();
     // Two-space gutter, same as the rows and the detail pane.
-    expect(field!.startsWith("  > ")).toBe(true);
+    expect(field!.startsWith("│   > ")).toBe(true);
   });
 
   it("wraps a long detail value under its own label", () => {
@@ -276,7 +276,7 @@ describe("VisionModelSelectorComponent", () => {
     expect(start).toBeGreaterThan(-1);
     // "Fallback ⇆ : " is 14 columns -> the value starts at 16, and so do its
     // continuation lines (they used to spill back to column 0).
-    expect(rows[start + 1]!.startsWith(" ".repeat(16))).toBe(true);
+    expect(rows[start + 1]!.startsWith("│ " + " ".repeat(16))).toBe(true);
     for (const row of rows.slice(start, start + 4)) {
       expect(visibleWidth(row)).toBeLessThanOrEqual(40);
     }

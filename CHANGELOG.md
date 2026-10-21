@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `/vision-watcher` picker draws the arnative rounded frame (`╭ ╮ ╰ ╯ │`) instead of full-width `─` rules. Rows
+  are truncated to `width - 4`, and narrow widths degrade without drawing past the screen.
+- The frame border uses the arnative soft tier: a declared `accentSoft` when the theme carries one, otherwise
+  a colour derived from `borderAccent` (OKLCH L 0.82, chroma x0.18, hue kept), and `accent` when the theme
+  exposes no resolvable colour. `theme.fg("accentSoft")` is never called, so pi 1.2+ themes cannot throw.
+- The selected row keeps its `→` marker in `accent`; the model id takes the soft tier in bold instead of
+  full `accent`.
+- The frame border follows the session thinking level via `theme.getThinkingBorderColor(level)`, the same colour Pi gives its editor border. The derived soft tier and `accent` stay as fallbacks when no level is available.
+
 ## [1.1.0] - 2026-10-05
 
 ### Changed

@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** the thinking ladder moves from `ctrl+shift+t` to `shift+tab`. `ctrl+shift+t` opens a new tab in Windows
+  Terminal and GNOME Terminal and is Pi's `app.session.tree`; `shift+tab` is one sequence (`ESC [ Z`) on every terminal and
+  is Pi's own thinking-cycle key.
+- **Breaking:** the failover chain toggle moves from `ctrl+enter` to `tab`. Some terminals maximise the window on `ctrl+enter`, and
+  without the kitty keyboard protocol it cannot be told from `enter`. `tab` is one byte on every terminal and OS.
+  `ctrl+enter` no longer does anything in the picker.
+- The reasoning warning in the picker reads `Warning:` instead of `⚠`, which some terminals draw as a
+  two-cell emoji that pushes the frame wall out of line.
 - The `/vision-watcher` picker draws the arnative rounded frame (`╭ ╮ ╰ ╯ │`) instead of full-width `─` rules. Rows
   are truncated to `width - 4`, and narrow widths degrade without drawing past the screen.
 - The frame border uses the arnative soft tier: a declared `accentSoft` when the theme carries one, otherwise

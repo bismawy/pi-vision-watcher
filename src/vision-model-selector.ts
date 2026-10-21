@@ -6,8 +6,8 @@
  * - Lists connected (authenticated) models, vision-capable ones first (✦ badge)
  * - A leading "None" row clears the configured vision model
  * - Space selects the highlighted model as the primary describer (toggle)
- * - Ctrl+Enter toggles the highlighted model in/out of the failover chain (max 3)
- * - Ctrl+Shift+R clears the failover chain, Ctrl+Shift+T walks the thinking ladder,
+ * - Tab toggles the highlighted model in/out of the failover chain (max 3)
+ * - Ctrl+Shift+R clears the failover chain, Shift+Tab walks the thinking ladder,
  *   Alt+A / Ctrl+Alt+A toggles async paste handoff, Alt+↑↓ reorders rows
  * - Enter or Ctrl+S saves, Esc / Ctrl+C cancels
  * - The primary is marked ✓, chain members ⇆
@@ -73,11 +73,12 @@ export function boxRow(content: string, width: number, paint: (s: string) => str
 
 /** Key that toggles failover-chain membership.
  *
- *  `ctrl+enter` is the one chord that survives Windows conhost/Windows Terminal,
- *  Linux/X11, macOS, tmux and SSH alike. The previous binding was `ctrl+q`, which
- *  collides with POSIX tty flow control (IXON: ctrl+s freezes / ctrl+q resumes
- *  output before the app sees it), with pi's own `app.message.followUp`, and —
- *  for the reset chord — with VTE's window-level "close terminal" accelerator.
+ *  Tab is one byte (0x09) on every terminal and OS, and no terminal, window manager
+ *  or multiplexer binds it. The search input has no Tab handler, and this chord is
+ *  intercepted before the input. ctrl+enter (1.1.0) maximises the window in some
+ *  terminals, and without the kitty keyboard protocol it cannot be told from enter.
+ *  ctrl+f is Search in herdr. The older ctrl+q hit POSIX tty flow control (IXON)
+ *  and pi's app.message.followUp; ctrl+shift+q hit VTE's close-terminal accelerator.
  *
  *  Reset uses `ctrl+shift+r` because R reads as Reset. It is unbound in every
  *  default terminal (VTE, Konsole, Windows Terminal, iTerm2 — kitty is the lone
@@ -85,8 +86,8 @@ export function boxRow(content: string, width: number, paint: (s: string) => str
  *  7-bit terminals it degrades to plain `ctrl+r`, which the app does not use, so
  *  the worst case is a no-op rather than a wrong action. The old `ctrl+shift+q`
  *  was impossible to type on those terminals: both it and `ctrl+q` emit 0x11. */
-const FALLBACK_KEY = Key.ctrl("enter");
-const FALLBACK_KEY_HINT = "ctrl+enter";
+const FALLBACK_KEY = "tab";
+const FALLBACK_KEY_HINT = "tab";
 const REORDER_UP_KEY = Key.alt("up");
 const REORDER_DOWN_KEY = Key.alt("down");
 /** Hint printed next to the async toggle in the detail pane (and the legend).
@@ -369,12 +370,11 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
-    // ctrl+t walks the whole thinking ladder (off → minimal → … → max → off) so
-    // one key covers on/off *and* effort — no separate shift+tab binding.
-    // Intercepted before the search input so it never lands in the filter text.
-    // `ctrl+t` is readline transpose-chars and pi's app.thinking.toggle (tool
-    // output); the ladder gets its own chord instead so both stay usable.
-    if (matchesKey(data, Key.ctrlShift("t"))) {
+    // shift+tab walks the whole thinking ladder (off, minimal ... max, off). It is one
+    // sequence (ESC [ Z) on every terminal and is pi's own app.thinking.cycle, so the
+    // meaning carries over. ctrl+shift+t opened a new tab in Windows Terminal and GNOME
+    // Terminal and is pi's app.session.tree. Intercepted before the search input.
+    if (matchesKey(data, "shift+tab")) {
       this.cycleThinking();
       this.updateList();
       return;
@@ -449,9 +449,9 @@ export class VisionModelSelectorComponent implements Component {
     const legend = [
       `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Done`,
       "[Space] Vision",
-      "[Ctrl+enter] Fallback",
+      "[Tab] Fallback",
       "[Ctrl+shift+r] Reset",
-      "[Ctrl+shift+t] Think",
+      "[Shift+tab] Think",
       "[Esc] Cancel",
     ].join("  ");
 
@@ -612,7 +612,7 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   /** The detail pane summarises the *configuration* (primary, failover chain
-   *  and toggles) rather than the highlighted row, so each space / ctrl+enter
+   *  and toggles) rather than the highlighted row, so each space / tab
    *  press shows exactly what will be saved.
    *
    *  Built per frame rather than cached in a child component because the
@@ -640,7 +640,7 @@ export class VisionModelSelectorComponent implements Component {
     };
 
     // Free-standing sentence (warning / transient notice), hanging-indented
-    // under its own `⚠`/first word.
+    // under its own first word.
     const note = (text: string) => {
       const indent = "    ";
       wrapTextWithAnsi(text, Math.max(8, width - indent.length)).forEach(
@@ -685,7 +685,7 @@ export class VisionModelSelectorComponent implements Component {
       note(
         this.theme.fg(
           "warning",
-          `  ⚠ ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
+          `  Warning: ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
         ),
       );
     }

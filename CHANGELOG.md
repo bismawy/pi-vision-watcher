@@ -19,6 +19,9 @@
 - The selected row keeps its `→` marker in `accent`; the model id takes the soft tier in bold instead of
   full `accent`.
 - The frame border follows the session thinking level via `theme.getThinkingBorderColor(level)`, the same colour Pi gives its editor border. The derived soft tier and `accent` stay as fallbacks when no level is available.
+- The picker detail pane is an arnative status table: `Label · STATUS | detail`, the label column padded so every
+  `·` divider sits in one column, one status word per row (`ON`/`OFF`, green when on, grey when off), and long details
+  wrap under their own column. The fallback chain shows its order with `→` and its cap as `(max 3)`.
 
 ## [1.1.0] - 2026-10-05
 

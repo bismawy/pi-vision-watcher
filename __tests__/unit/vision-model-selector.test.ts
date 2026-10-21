@@ -54,10 +54,10 @@ function build(opts: {
 describe("VisionModelSelectorComponent", () => {
   it("summarises the configuration in the detail pane", () => {
     const { text } = build({ currentRef: "p/a" });
-    expect(text()).toContain("Vision-capable ✦ : A (P)");
-    expect(text()).toContain("Fallback ⇆ : off");
-    expect(text()).toContain("Thinking: off");
-    expect(text()).toContain("Async pasted-path fallback: off");
+    expect(text()).toMatch(/Vision-capable ✦ +· ON \| A \(P\)/);
+    expect(text()).toMatch(/Fallback ⇆ +· OFF/);
+    expect(text()).toMatch(/Thinking +· OFF/);
+    expect(text()).toMatch(/Async pasted-path fallback · OFF |/);
     // Old highlighted-row label is gone.
     expect(text()).not.toContain("Model Name:");
   });
@@ -65,7 +65,7 @@ describe("VisionModelSelectorComponent", () => {
   it("lists the chain with names and marks its rows ⇆", () => {
     const { text } = build({ currentRef: "p/a", fallbacks: ["p/b", "p/c"] });
     const rendered = text();
-    expect(rendered).toContain("Fallback ⇆ : on - B (P), C (P)");
+    expect(rendered).toMatch(/Fallback ⇆ +· ON \| B \(P\) → C \(P\) \(max 3\)/);
     const rows = rendered.split("\n");
     expect(rows.find((l) => l.includes(" b [p]"))).toContain("⇆");
     expect(rows.find((l) => l.includes(" c [p]"))).toContain("⇆");
@@ -77,7 +77,7 @@ describe("VisionModelSelectorComponent", () => {
     const { component, done, text } = build({ currentRef: null });
     component.handleInput(DOWN); // None → p/a
     component.handleInput(SPACE);
-    expect(text()).toContain("Vision-capable ✦ : A (P)");
+    expect(text()).toMatch(/Vision-capable ✦ +· ON \| A \(P\)/);
     component.handleInput(ENTER);
     expect(done.mock.calls[0][0].ref).toBe("p/a");
   });
@@ -94,7 +94,7 @@ describe("VisionModelSelectorComponent", () => {
     const { component, text } = build({ currentRef: "p/a" });
     component.handleInput("b"); // filter query
     component.handleInput(SPACE);
-    expect(text()).toContain("Vision-capable ✦ : A (P)");
+    expect(text()).toMatch(/Vision-capable ✦ +· ON \| A \(P\)/);
   });
 
   it("adopts the highlighted match with enter while a filter is active", () => {
@@ -152,7 +152,7 @@ describe("VisionModelSelectorComponent", () => {
     component.handleInput(DOWN); // None → p/a
     component.handleInput(DOWN); // p/a → p/b
     component.handleInput(ALT_UP); // p/b before p/a
-    expect(text()).toContain("Fallback ⇆ : off");
+    expect(text()).toMatch(/Fallback ⇆ +· OFF/);
     expect(text().indexOf(" b [p]")).toBeLessThan(text().indexOf(" a [p]"));
     component.handleInput(ALT_DOWN); // back to start
     expect(text().indexOf(" a [p]")).toBeLessThan(text().indexOf(" b [p]"));
@@ -185,19 +185,22 @@ describe("VisionModelSelectorComponent", () => {
 
   it("walks the thinking ladder with shift+tab and wraps without sticking", () => {
     const { component, text } = build({ level: "medium" });
-    const thinking = () => /Thinking: (on \(\w+\)|off)/.exec(text())?.[1];
+    const thinking = () => {
+    const m = /Thinking +· (ON \| (\w+)|OFF)/.exec(text());
+    return m?.[1] === "OFF" ? "off" : m?.[2];
+    };
     expect(thinking()).toBe("off");
     // The ladder always advances through every level and back to off — it must
     // not degenerate into off → max → off once the tail is reached.
     for (const expected of [
-      "on (minimal)",
-      "on (low)",
-      "on (medium)",
-      "on (high)",
-      "on (xhigh)",
-      "on (max)",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
       "off",
-      "on (minimal)",
+      "minimal",
     ]) {
       component.handleInput(SHIFT_TAB);
       expect(thinking()).toBe(expected);
@@ -221,22 +224,22 @@ describe("VisionModelSelectorComponent", () => {
   it("ignores ctrl+shift+t now that shift+tab owns the thinking ladder", () => {
     const { component, text } = build({ level: "medium" });
     component.handleInput("\x1b[116;6u");
-    expect(/Thinking: (on \(\w+\)|off)/.exec(text())?.[1]).toBe("off");
+    expect(/Thinking +· (ON|OFF)/.exec(text())?.[1]).toBe("OFF");
   });
 
   it("toggles async paste handoff with alt+a and ctrl+alt+a", () => {
     for (const key of [ALT_A, CTRL_ALT_A]) {
       const { component, text } = build();
-      expect(text()).toContain("Async pasted-path fallback: off");
+      expect(text()).toMatch(/Async pasted-path fallback · OFF |/);
       component.handleInput(key);
-      expect(text()).toContain("Async pasted-path fallback: on");
+      expect(text()).toMatch(/Async pasted-path fallback · ON |/);
     }
   });
 
   it("prints the async chord beside the async state", () => {
     const { text } = build();
     const flat = text().replace(/\s+/g, " ");
-    expect(flat).toContain("Async pasted-path fallback: off [Ctrl+alt+a]");
+    expect(flat).toContain("Async pasted-path fallback · OFF | [Ctrl+alt+a]");
   });
 
   it("does not repeat a provider the model name already carries", () => {
@@ -260,7 +263,8 @@ describe("VisionModelSelectorComponent", () => {
       [],
     );
     const rendered = component.render(100).join("\n");
-    expect(rendered).toContain("Vision-capable ✦ : Gemini 3.8 Flash (Antigravity)");
+    expect(rendered).toContain("Gemini 3.8 Flash (Antigravity)");
+    expect(rendered).toMatch(/Vision-capable ✦ +· ON \|/);
     expect(rendered).not.toContain("(Antigravity) (Antigravity)");
   });
 
@@ -285,11 +289,11 @@ describe("VisionModelSelectorComponent", () => {
       ["p/a", "p/b", "p/c", "p/d"],
     );
     const rows = component.render(40);
-    const start = rows.findIndex((l) => l.includes("Fallback ⇆ :"));
+    const start = rows.findIndex((l) => /Fallback ⇆ +·/.test(l));
     expect(start).toBeGreaterThan(-1);
     // "Fallback ⇆ : " is 14 columns -> the value starts at 16, and so do its
     // continuation lines (they used to spill back to column 0).
-    expect(rows[start + 1]!.startsWith("│ " + " ".repeat(16))).toBe(true);
+    expect(rows[start + 1]!.startsWith("│ " + " ".repeat(20))).toBe(true);
     for (const row of rows.slice(start, start + 4)) {
       expect(visibleWidth(row)).toBeLessThanOrEqual(40);
     }

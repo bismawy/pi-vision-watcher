@@ -3,14 +3,14 @@
  * describes images during vision handoff.
  *
  * Uses the same patterns as pi's built-in selectors and pi-hide-providers:
- * - Lists connected (authenticated) models, vision-capable ones first (✦ badge)
+ * - Lists connected (authenticated) vision-capable models as bare `provider/id` refs
  * - A leading "None" row clears the configured vision model
  * - Space selects the highlighted model as the primary describer (toggle)
  * - Tab toggles the highlighted model in/out of the failover chain (max 3)
  * - Ctrl+Shift+R clears the failover chain, Shift+Tab walks the thinking ladder,
  *   Alt+A / Ctrl+Alt+A toggles async paste handoff, Alt+↑↓ reorders rows
  * - Enter or Ctrl+S saves, Esc / Ctrl+C cancels
- * - The primary is marked ✓, chain members ⇆
+ * - The primary is the checked row [x], chain members ⇆ (providers style)
  */
 
 import {
@@ -255,13 +255,9 @@ export class VisionModelSelectorComponent implements Component {
       ),
     );
     lines.push("");
-    // Indented to the list's two-column gutter: at column 0 the field reads as
-    // a stray line rather than as the thing the list is filtered by.
-    lines.push(
-      ...this.searchInput
-        .render(Math.max(1, width - 2))
-        .map((line) => `  ${line}`),
-    );
+    // Flush with the wall: boxRow already supplies the one-space pad, so the
+    // field carries no prefix of its own — same column as the providers input.
+    lines.push(...this.searchInput.render(Math.max(1, width)));
     lines.push("");
     lines.push(...this.listContainer.render(width));
     lines.push("");
@@ -457,7 +453,9 @@ export class VisionModelSelectorComponent implements Component {
       "[Esc] Cancel",
     ].join("  ");
 
-    return `${this.theme.fg("dim", "  ")}${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${legend}`)}`;
+    // No prefix: boxRow's own pad is the one space, exactly like the providers
+    // legend row (`│ 34/44 picked · … │`).
+    return `${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${legend}`)}`;
   }
 
   /** Move `ref` one row up/down in the display list. The None row is pinned at
@@ -536,7 +534,7 @@ export class VisionModelSelectorComponent implements Component {
 
     if (this.filteredItems.length === 0) {
       this.listContainer.addChild(
-        new Text(this.theme.fg("muted", "  No matching models"), 0, 0),
+        new Text(this.theme.fg("muted", "No matching models"), 0, 0),
       );
     }
 
@@ -549,6 +547,14 @@ export class VisionModelSelectorComponent implements Component {
     );
     const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
 
+    // Hidden rows are announced like the providers list, never silently cut: the
+    // ↑ count sits above the window, the ↓ count below it.
+    if (startIndex > 0) {
+      this.listContainer.addChild(
+        new Text(this.theme.fg("dim", `↑ ${startIndex} more`), 0, 0),
+      );
+    }
+
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.filteredItems[i];
       if (!item) continue;
@@ -560,20 +566,19 @@ export class VisionModelSelectorComponent implements Component {
       if (item.none) {
         label = this.theme.fg("warning", item.modelName);
       } else {
-        const labelled = isSelected
-          ? softPainter(this.theme, "accent", "accent")(this.theme.bold(item.modelId))
-          : item.modelId;
-        const badge = item.vision ? this.theme.fg("success", " ✦") : this.theme.fg("muted", " ·");
-        const providerBadge = this.theme.fg("muted", ` [${item.provider}]`);
-        label = `${labelled}${providerBadge}${badge}`;
+        // Providers style: the bare `provider/id` ref, no badges — unselected
+        // rows sit in muted, the selected row takes the soft tier in bold.
+        label = isSelected
+          ? softPainter(this.theme, "accent", "accent")(this.theme.bold(item.ref!))
+          : this.theme.fg("muted", item.ref!);
       }
 
-      const current = item.ref === this.currentRef && item.ref !== null
-        ? this.theme.fg("success", " ✓")
-        : item.none && this.currentRef === null
-          ? this.theme.fg("success", " ✓")
-          : "";
-      // Fallback marker — distinct from the primary's ✓ so a model can visibly
+      // Providers-style checkbox: the picked state is chrome, `[x]` accent / `[ ]`
+      // dim — it replaces the old ✓ marker so the primary reads like a checked row.
+      const marked = item.none ? this.currentRef === null : item.ref === this.currentRef;
+      const mark = marked ? this.theme.fg("accent", "[x] ") : this.theme.fg("dim", "[ ] ");
+
+      // Fallback marker — distinct from the primary's check so a model can visibly
       // be both the primary and a fallback (Sonnet as primary, Gemini as the
       // chain behind it).
       const fallbackMark =
@@ -581,15 +586,12 @@ export class VisionModelSelectorComponent implements Component {
           ? this.theme.fg("warning", " ⇆")
           : "";
 
-      this.listContainer.addChild(new Text(`${prefix}${label}${current}${fallbackMark}`, 0, 0));
+      this.listContainer.addChild(new Text(`${prefix}${mark}${label}${fallbackMark}`, 0, 0));
     }
 
-    if (startIndex > 0 || endIndex < this.filteredItems.length) {
+    if (endIndex < this.filteredItems.length) {
       this.listContainer.addChild(
-        new Text(
-          this.theme.fg("muted", `  (${this.selectedIndex + 1}/${this.filteredItems.length})`),
-          0, 0,
-        ),
+        new Text(this.theme.fg("dim", `↓ ${this.filteredItems.length - endIndex} more`), 0, 0),
       );
     }
 

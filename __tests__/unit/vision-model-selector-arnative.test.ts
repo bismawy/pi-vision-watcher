@@ -81,7 +81,7 @@ describe("VisionModelSelectorComponent arnative look", () => {
     const c = new VisionModelSelectorComponent(tagged as any, models as any, "p/a", false, "medium", false, () => {});
     const row = c.render(400).find((l) => l.includes("→"))!;
     expect(row).toContain("<accent>→ </accent>");
-    expect(row).toContain("<soft><b>a</b></soft>");
+    expect(row).toContain("<soft><b>p/a</b></soft>");
     expect(row).not.toContain("<accent>a</accent>");
   });
 });

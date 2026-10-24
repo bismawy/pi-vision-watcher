@@ -67,10 +67,10 @@ describe("VisionModelSelectorComponent", () => {
     const rendered = text();
     expect(rendered).toMatch(/Fallback ⇆ +· ON \| B \(P\) → C \(P\) \(max 3\)/);
     const rows = rendered.split("\n");
-    expect(rows.find((l) => l.includes(" b [p]"))).toContain("⇆");
-    expect(rows.find((l) => l.includes(" c [p]"))).toContain("⇆");
-    expect(rows.find((l) => l.includes(" a [p]"))).not.toContain("⇆");
-    expect(rows.find((l) => l.includes(" a [p]"))).toContain("✓");
+    expect(rows.find((l) => l.includes(" p/b"))).toContain("⇆");
+    expect(rows.find((l) => l.includes(" p/c"))).toContain("⇆");
+    expect(rows.find((l) => l.includes(" p/a"))).not.toContain("⇆");
+    expect(rows.find((l) => l.includes(" p/a"))).toContain("[x]");
   });
 
   it("space selects the highlighted model as the primary", () => {
@@ -153,24 +153,24 @@ describe("VisionModelSelectorComponent", () => {
     component.handleInput(DOWN); // p/a → p/b
     component.handleInput(ALT_UP); // p/b before p/a
     expect(text()).toMatch(/Fallback ⇆ +· OFF/);
-    expect(text().indexOf(" b [p]")).toBeLessThan(text().indexOf(" a [p]"));
+    expect(text().indexOf(" p/b")).toBeLessThan(text().indexOf(" p/a"));
     component.handleInput(ALT_DOWN); // back to start
-    expect(text().indexOf(" a [p]")).toBeLessThan(text().indexOf(" b [p]"));
+    expect(text().indexOf(" p/a")).toBeLessThan(text().indexOf(" p/b"));
   });
 
   it("never reorders the pinned None row", () => {
     const { component, text } = build();
     component.handleInput(DOWN); // None → p/a
     component.handleInput(ALT_UP); // would cross None
-    const rows = text().split("\n").filter((l) => l.includes(" [p]"));
-    expect(rows[0]).toContain(" a [p]");
+    const rows = text().split("\n").filter((l) => l.includes(" p/"));
+    expect(rows[0]).toContain(" p/a");
   });
 
   it("leaves alt+up/alt+down alone while a filter is active", () => {
     const { component, text } = build();
     component.handleInput("b");
     component.handleInput(ALT_DOWN);
-    expect(text().indexOf(" a [p]")).toBeLessThan(text().indexOf(" b [p]"));
+    expect(text().indexOf(" p/a")).toBeLessThan(text().indexOf(" p/b"));
   });
 
   it("renders the footer legend with the count first", () => {
@@ -181,6 +181,28 @@ describe("VisionModelSelectorComponent", () => {
     expect(flat).toContain(
       "4 models · [↑↓] Move [Enter] Done [Space] Vision [Tab] Fallback [Ctrl+shift+r] Reset [Shift+tab] Think [Esc] Cancel",
     );
+  });
+
+  it("announces hidden rows with ↑ above the list and ↓ below it", () => {
+    const many = Array.from({ length: 16 }, (_, i) => ({
+      provider: "p",
+      id: `m${i}`,
+      name: `m${i}`,
+      input: ["text", "image"] as const,
+      reasoning: true,
+    }));
+    const done = vi.fn();
+    // Cursor mid-list (m8, the 9th of 17 rows) so the window scrolls and both
+    // ends hide rows: 4 above, 3 below.
+    const component = new VisionModelSelectorComponent(theme, many as any, "p/m8", false, "medium", false, done);
+    const lines = component.render(80);
+    const up = lines.findIndex((l) => l.includes("↑ 4 more"));
+    const down = lines.findIndex((l) => l.includes("↓ 3 more"));
+    const firstRow = lines.findIndex((l) => l.includes("[ ] p/m"));
+    const lastRow = lines.map((l) => l.includes("[ ] p/m") || l.includes("→ ")).lastIndexOf(true);
+    expect(up).toBeGreaterThanOrEqual(0);
+    expect(up).toBeLessThan(firstRow);
+    expect(down).toBeGreaterThan(lastRow);
   });
 
   it("walks the thinking ladder with shift+tab and wraps without sticking", () => {
@@ -272,8 +294,9 @@ describe("VisionModelSelectorComponent", () => {
     const { component } = build();
     const field = component.render(100).find((l) => l.includes("filter models"));
     expect(field).toBeDefined();
-    // Two-space gutter, same as the rows and the detail pane.
-    expect(field!.startsWith("│   > ")).toBe(true);
+    // One-space gutter: the whole left column (search, rows, footer) sits one
+    // pad in from the wall, like the providers model list.
+    expect(field!.startsWith("│ > ")).toBe(true);
   });
 
   it("wraps a long detail value under its own label", () => {

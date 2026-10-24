@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- The `/vision-watcher` picker adopts the pi-arnative providers model-list style: rows render a checkbox
+  (`[x]` accent when the row is the primary, `[ ]` dim otherwise) instead of a trailing `✓`, labels are the
+  bare `provider/id` ref (no `[provider]`/`✦` badges; unselected rows sit in muted), and a scrolled list
+  announces hidden rows with `↑ N more` / `↓ N more` lines instead of `(cursor/total)`. The search field and
+  the footer sit flush in the frame's one-space pad with no prefix of their own, like the providers screen.
+  Fallback members keep the `⇆` mark.
+
 ## [1.2.0] - 2026-10-21
 
 ### Changed

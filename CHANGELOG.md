@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.0] - 2026-10-24
 
 ### Changed
 - The `/vision-watcher` picker adopts the pi-arnative providers model-list style: rows render a checkbox

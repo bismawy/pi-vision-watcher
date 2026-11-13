@@ -37,18 +37,19 @@ pi --extension ./vision-watcher.ts
 | --- | --- |
 | `↑` · `↓` | Move the highlight up/down the list |
 | `space` | Toggle highlighted model as primary describer |
-| `tab` | Toggle highlighted model in/out of failover chain (marked ⇆, max 3) |
-| `ctrl+shift+r` | Reset failover chain |
+| `tab` | Toggle highlighted model in/out of failover chain (max 3) |
+| `r` | Reset failover chain (`ctrl+shift+r` also works) |
 | `alt+↑` · `alt+↓` | Reorder the highlighted model (the chain follows list order) |
 | `shift+tab` | Walk thinking ladder (`off` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max`) |
-| `ctrl+alt+a` | Toggle async paste handoff (`alt+a` also works on Windows/macOS) |
+| `/` | Open the filter; `enter` or `esc` closes it and keeps the query |
+| `a` | Toggle async paste handoff (`alt+a`, or `ctrl+alt+a` on Linux) |
 | `enter` · `ctrl+s` | Save configuration (primary describer and chain) |
 | `esc` | Cancel and exit picker |
 
 > **Notes:**
-> - In filter mode, `space` enters a space character so multi-word queries (e.g. `gemini 3.8`) stay typeable; press `enter` to adopt the highlighted match as the primary describer.
-> - The detail pane renders live preview updates before saving.
-> - Chords are chosen to avoid POSIX tty flow control (`ctrl+s`/`ctrl+q`), VTE's window-level `ctrl+shift+q`, readline keys (`ctrl+a`/`ctrl+t`) and pi's own bindings. `tab` works on Windows Terminal/conhost, X11, macOS, tmux and SSH. `ctrl+alt+a` is the safe half of the async chord on international layouts, where AltGr occupies `alt+a`.
+> - Letters are commands, not filter text: only `/` hands the keyboard to the filter. While it is open, `space` is a space character, so queries like `gemini 3.8` stay typeable; `enter` closes the filter and keeps the query, and a second `enter` saves.
+> - The header names the whole configuration in model names (`Primary`, `Fallback` chain, `Thinking` level), so the picked models stay visible even when they sit outside the visible rows. Each row hugs its ref with a role marker: `✓ primary` in accent, `✓ fallback 1` in the primary tone, then the fact in parentheses (`(thinking off)`, `(no thinking)`). There is no per-row checkbox: the picker chooses one primary, so the role marker carries that and the primary row keeps the accent colour.
+> - Letters are commands, so `a` and `r` are free: only `/` hands the keyboard to the filter. `tab` works on Windows Terminal/conhost, X11, macOS, tmux and SSH. `ctrl+s` is avoided because POSIX tty flow control (IXON) eats it on some terminals; `enter` does the same job.
 
 ## Commands
 

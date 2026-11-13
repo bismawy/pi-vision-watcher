@@ -10,11 +10,11 @@
  * - Ctrl+Shift+R clears the failover chain, Shift+Tab walks the thinking ladder,
  *   Alt+A / Ctrl+Alt+A toggles async paste handoff, Alt+↑↓ reorders rows
  * - Enter or Ctrl+S saves, Esc / Ctrl+C cancels
- * - The primary is the checked row [x], chain members ⇆ (providers style)
+ * - The primary and chain members are named in a note column, not a checkbox:
+ *   a single-choice list has nothing to check
  */
 
 import {
-  Container,
   type Component,
   fuzzyFilter,
   getKeybindings,
@@ -80,20 +80,19 @@ export function boxRow(content: string, width: number, paint: (s: string) => str
  *  ctrl+f is Search in herdr. The older ctrl+q hit POSIX tty flow control (IXON)
  *  and pi's app.message.followUp; ctrl+shift+q hit VTE's close-terminal accelerator.
  *
- *  Reset uses `ctrl+shift+r` because R reads as Reset. It is unbound in every
- *  default terminal (VTE, Konsole, Windows Terminal, iTerm2 — kitty is the lone
- *  exception, where it resizes a window) and unbound anywhere in pi. On legacy
- *  7-bit terminals it degrades to plain `ctrl+r`, which the app does not use, so
- *  the worst case is a no-op rather than a wrong action. The old `ctrl+shift+q`
- *  was impossible to type on those terminals: both it and `ctrl+q` emit 0x11. */
+ *  Reset is `r` now that letters are free (the field owns text only while `/`
+ *  opened it). `ctrl+shift+r` stays as an alias for muscle memory; it is unbound
+ *  in every default terminal except kitty, where it resizes a window. */
 const FALLBACK_KEY = "tab";
 const FALLBACK_KEY_HINT = "tab";
 const REORDER_UP_KEY = Key.alt("up");
 const REORDER_DOWN_KEY = Key.alt("down");
-/** Hint printed next to the async toggle in the detail pane (and the legend).
- *  `ctrl+alt+a` is the Linux-safe half: AltGr occupies alt+a on intl layouts
- *  (`@`, `ł`), so the selector accepts both chords. */
-const ASYNC_KEY_HINT = "[Ctrl+alt+a]";
+/** Legend hints. A bare letter is free because letters are only text while `/`
+ *  owns the field. The old chords stay as aliases for muscle memory: `alt+a`
+ *  (Windows/macOS) and `ctrl+alt+a` (Linux, where AltGr takes `alt+a` on intl
+ *  layouts), and `ctrl+shift+r` for reset. */
+const ASYNC_KEY_HINT = "[A]";
+const RESET_KEY_HINT = "[R]";
 
 /** Provider ids that don't title-case cleanly. Everything else falls back to
  *  word-capitalisation (`custom-openrouter-ai` → "Custom Openrouter AI"). */
@@ -136,6 +135,31 @@ interface DisplayItem {
   none?: boolean;
 }
 
+/** One rendered list row kept in parts: the note column is dropped from the tail
+ *  at render time when the frame is narrow, so a note never gets cut mid-word. */
+interface ListRow {
+  kind: "row";
+  /** "-> " (selected) or two spaces, already painted. */
+  prefix: string;
+  /** The row label, already painted. */
+  label: string;
+  /** Same label without paint, for the column width. */
+  labelText: string;
+  /** Painted role marker: `✓ primary` in accent, `✓ fallback 1` in the primary
+   *  tone, or null when the row is neither. */
+  role: string | null;
+  /** Painted `(thinking off)` / `(no thinking)` in dim, or null. */
+  detail: string | null;
+}
+
+/** A painted line with no columns: the ↑/↓ counts and the empty-list notice. */
+interface ListLine {
+  kind: "line";
+  text: string;
+}
+
+type ListEntry = ListRow | ListLine;
+
 export interface VisionModelSelectorResult {
   /** The selected "provider/id", or null if the user picked "None" / cancelled. */
   ref: string | null;
@@ -163,8 +187,9 @@ export class VisionModelSelectorComponent implements Component {
   private selectedIndex = 0;
   private readonly maxVisible = 10;
   private searchInput: Input;
-  private listContainer: Container;
-  private footerText: Text;
+  /** List rows kept in parts: the note column is padded and thinned at render
+   *  time because how much room a note gets depends on the frame width. */
+  private listEntries: ListEntry[] = [];
 
   private currentRef: string | null;
   private thinking: boolean;
@@ -172,7 +197,12 @@ export class VisionModelSelectorComponent implements Component {
   private asyncClipboardHandoff: boolean;
   /** Fallback-chain membership, toggled in-place with {@link FALLBACK_KEY}. */
   private fallbacks: Set<string>;
-  /** Transient hint (e.g. chain cap hit), rendered in the detail pane. */
+  /** Whether `/` has handed the keyboard to the filter field. Idle, the line is a
+   *  dim prompt (like every arnative screen), so letters stay commands; typing,
+   *  every printable key is text. `/`, Enter or Esc leave typing and keep the
+   *  query, so the keys act on the rows it matched. */
+  private typing = false;
+  /** Transient hint (e.g. chain cap hit), rendered above the legend. */
   private notice: string | null = null;
 
   private _focused = false;
@@ -181,7 +211,9 @@ export class VisionModelSelectorComponent implements Component {
   }
   set focused(value: boolean) {
     this._focused = value;
-    this.searchInput.focused = value;
+    // The field owns the cursor only while typing; idle it is a dim prompt line,
+    // so pi focusing the component must not paint a fake cursor into it.
+    this.searchInput.focused = value && this.typing;
   }
 
   constructor(
@@ -218,12 +250,10 @@ export class VisionModelSelectorComponent implements Component {
     // A bare `> ` gives no hint that this line filters the list, so the field
     // carries an inline placeholder until something is typed.
     this.searchInput = new Input({
-      placeholder: "type to filter models…",
+      prompt: this.theme.fg("accent", "> "),
+      placeholder: "Type to filter models…",
       placeholderStyle: (text) => this.theme.fg("muted", text),
     });
-    this.listContainer = new Container();
-    this.footerText = new Text(this.getFooterText(), 0, 0);
-
     this.searchInput.onSubmit = () => this.save();
 
     this.updateList();
@@ -255,20 +285,102 @@ export class VisionModelSelectorComponent implements Component {
       ),
     );
     lines.push("");
-    // Flush with the wall: boxRow already supplies the one-space pad, so the
-    // field carries no prefix of its own — same column as the providers input.
-    lines.push(...this.searchInput.render(Math.max(1, width)));
+    lines.push(...this.summaryLines(width));
     lines.push("");
-    lines.push(...this.listContainer.render(width));
+    // Filter line, arnative style: idle it is a dim prompt the eye reads as a
+    // field but the keyboard does not own, so `/` starts typing and every
+    // letter stays a command until then. Flush with the wall: boxRow supplies
+    // the one-space pad.
+    lines.push(...this.filterLine(width));
     lines.push("");
-    lines.push(...this.detailLines(width));
+    lines.push(...this.renderList(width));
     lines.push("");
-    lines.push(...this.footerText.render(width));
+    lines.push(...this.noteLines(width));
+    lines.push(...this.legendLines(width));
     return lines;
+  }
+
+  /** The idle prompt carries the kept query, so a filter that is no longer
+   *  being typed still shows what it matches. */
+  private filterLine(width: number): string[] {
+    if (this.typing) return this.searchInput.render(Math.max(1, width));
+    const query = this.searchInput.getValue();
+    const shown = query
+      ? this.theme.fg("text", query)
+      : this.theme.fg("dim", "Type to filter models…");
+    return [this.theme.fg("borderMuted", "> ") + shown];
+  }
+
+  /** The configuration spelled out in model names: the primary, the failover
+   *  chain in the order it is tried, and the thinking level. With 70 rows the
+   *  picked models scroll out of the window, so this header is what answers
+   *  "which models am I actually using" without hunting them down one by one.
+   *  Labels share one column, arnative status-panel style, and a long row wraps
+   *  under its own value instead of spilling to column 0. */
+  private summaryLines(width: number): string[] {
+    const labels = {
+      primary: "Primary",
+      fallback: "Fallback",
+      thinking: "Thinking",
+    };
+    const col = Math.max(...Object.values(labels).map((l) => visibleWidth(l)));
+
+    const row = (labelText: string, body: string, color: ThemeColor = "text") => {
+      const head = this.theme.fg("dim", labelText + " ".repeat(col - visibleWidth(labelText)));
+      const indent = " ".repeat(col + 3); // label column + " · "
+      const wrapped = wrapTextWithAnsi(body, Math.max(8, width - indent.length));
+      const out = [head + this.theme.fg("dim", " · ") + this.theme.fg(color, wrapped[0] ?? "")];
+      for (const extra of wrapped.slice(1)) out.push(indent + this.theme.fg(color, extra));
+      return out;
+    };
+
+    const chain = this.currentRef ? this.chainBehindPrimary() : [];
+    // Every value uses the same colour. A dim label next to a bright value read
+    // as "only the primary is real"; the label column is chrome, the value is
+    // the fact. An absent value (no primary) stays muted so it cannot be
+    // mistaken for a model name.
+    const out: string[] = [];
+    out.push(
+      ...row(
+        labels.primary,
+        this.currentRef ? this.refLabel(this.currentRef) : "none — vision watcher off",
+        this.currentRef ? "text" : "muted",
+      ),
+    );
+    if (chain.length) {
+      out.push(...row(labels.fallback, chain.map((r) => this.refLabel(r)).join(" → ")));
+    }
+    out.push(...row(labels.thinking, this.thinking ? this.thinkingLevel : "off"));
+    return out;
+  }
+
+  /** Warnings under the list (highlighted row can't think; a refused chain add),
+   *  the way arnative floats a warn line above its legend. */
+  private noteLines(width: number): string[] {
+    const out: string[] = [];
+    const highlighted = this.filteredItems[this.selectedIndex];
+    if (this.thinking && highlighted && !highlighted.none && !highlighted.reasoning) {
+      out.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "warning",
+            `Warning: ${highlighted.modelId} declares no reasoning, so thinking will be ignored`,
+          ),
+          width,
+        ),
+      );
+    }
+    if (this.notice) {
+      out.push(...wrapTextWithAnsi(this.theme.fg("warning", this.notice), width));
+    }
+    return out.length ? [...out, ""] : [];
   }
 
   handleInput(data: string): void {
     const kb = getKeybindings();
+
+    // The filter owns the keyboard only while `/` has handed it over.
+    if (this.searchKey(data)) return;
 
     if (kb.matches(data, "tui.select.up")) {
       if (this.filteredItems.length === 0) return;
@@ -331,10 +443,9 @@ export class VisionModelSelectorComponent implements Component {
     }
 
     // Space selects the highlighted model as the primary describer; pressing it
-    // again on the same model clears it back to "None". While a filter query is
-    // present, space is left to the search input so multi-word queries like
-    // "gemini 3.8" stay typeable.
-    if ((data === " " || matchesKey(data, Key.space)) && !this.searchInput.getValue()) {
+    // again on the same model clears it back to "None". Typing already owns the
+    // key (searchKey runs first), so a kept query does not steal it back.
+    if ((data === " " || matchesKey(data, Key.space)) && !this.typing) {
       const item = this.filteredItems[this.selectedIndex];
       if (item) this.selectPrimary(item.ref);
       return;
@@ -345,7 +456,8 @@ export class VisionModelSelectorComponent implements Component {
     // chosen together. Intercepted before the search input (like the other ctrl
     // shortcuts) so the key never lands in the filter text. See
     // {@link FALLBACK_KEY} for why it isn't ctrl+f.
-    if (matchesKey(data, "ctrl+shift+r")) {
+    // `r` is Reset; `ctrl+shift+r` stays as the older chord.
+    if (data === "r" || data === "R" || matchesKey(data, "ctrl+shift+r")) {
       this.clearFallbacks();
       return;
     }
@@ -356,11 +468,16 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
-    // alt+a on Windows/macOS, ctrl+alt+a on Linux where AltGr takes alt+a
-    // (intl layouts: `@`, `ł`). `ctrl+a` is the editor's cursorLineStart (Home)
-    // and GNU Screen / tmux's command prefix, so it cannot be repurposed here.
-    // Intercepted before the search input so it never lands in the filter text.
-    if (matchesKey(data, Key.alt("a")) || matchesKey(data, Key.ctrlAlt("a"))) {
+    // `a` is Async; alt+a and ctrl+alt+a stay as aliases. `ctrl+a` is the
+    // editor's cursorLineStart (Home) and GNU Screen / tmux's command prefix, so
+    // it is left alone. Intercepted before the search input so the key never
+    // lands in the filter text.
+    if (
+      data === "a" ||
+      data === "A" ||
+      matchesKey(data, Key.alt("a")) ||
+      matchesKey(data, Key.ctrlAlt("a"))
+    ) {
       this.asyncClipboardHandoff = !this.asyncClipboardHandoff;
       this.updateList();
       return;
@@ -376,14 +493,51 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
+    // Nothing else is a command: a stray letter must not type into a filter
+    // the user has not opened (that is what `/` is for).
+  }
+
+  /** Hand `data` to the filter while typing. Outside typing only `/` starts;
+   *  while typing `/`, Enter and Esc stop typing and KEEP the query, so the
+   *  rows it matched stay filtered and the commands act on them. Arrows stay
+   *  navigation even while typing, so a match is reachable without leaving the
+   *  field. Ctrl+C drops the query and the field together. */
+  private searchKey(data: string): boolean {
+    if (!this.typing) {
+      if (data !== "/") return false;
+      this.setTyping(true);
+      return true;
+    }
+    if (data === "/" || matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
+      this.setTyping(false);
+      return true;
+    }
+    if (matchesKey(data, Key.ctrl("c"))) {
+      this.searchInput.setValue("");
+      this.setTyping(false);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "up") || matchesKey(data, "down")) return false;
+    const before = this.searchInput.getValue();
     this.searchInput.handleInput(data);
-    this.refresh();
+    if (this.searchInput.getValue() !== before) {
+      this.selectedIndex = 0;
+      this.refresh();
+    } else {
+      this.updateList();
+    }
+    return true;
+  }
+
+  private setTyping(typing: boolean): void {
+    this.typing = typing;
+    this.searchInput.focused = typing;
+    this.updateList();
   }
 
   invalidate(): void {
     this.searchInput.invalidate();
-    this.listContainer.invalidate();
-    this.footerText.invalidate();
   }
 
   // Internal helpers
@@ -430,32 +584,55 @@ export class VisionModelSelectorComponent implements Component {
     return [...items, ...visionModels];
   }
 
-  private getFooterText(): string {
+  /** The legend, packed greedily into rows that fit the frame: a truncated
+   *  legend advertises keys nobody can read, and a key is never worth splitting.
+   *  The count opens the first row the way arnative prints `34/44 picked · …`.
+   *  Toggle state sits beside the key that owns it (`[c] Session cost`), so the
+   *  screen needs no status panel. */
+  private legendLines(width: number): string[] {
     const totalCount = this.allItems.length - 1; // exclude the None row
+    // The None row is not a model, and a filter can drop it, so count the rows
+    // that name one instead of subtracting a row that may not be there.
     const count = this.searchInput.getValue()
-      ? `${this.filteredItems.length - 1} matches`
+      ? `${this.filteredItems.filter((i) => !i.none).length} matches`
       : `${totalCount} models`;
-
-    // One legend line: the count carries the accent colour so it is the first
-    // thing the eye lands on, while the keys stay dim so they do not compete
-    // with the picker itself. The chords need roughly 130 columns, which wraps
-    // gracefully; the async chord is hinted beside the state it toggles (and in
-    // the README) instead of bloating this strip. `Move` is the highlight, not
-    // the row: reordering is `alt+↑↓` and lives in the README.
     const confirm = keyText("tui.select.confirm");
-    const legend = [
-      "[↑↓] Move",
-      `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Done`,
-      "[Space] Vision",
+    const keys = [
+      "[Space] Primary",
       "[Tab] Fallback",
-      "[Ctrl+shift+r] Reset",
       "[Shift+tab] Think",
+      `${ASYNC_KEY_HINT} Async ${this.asyncClipboardHandoff ? "on" : "off"}`,
+      "[/] Filter",
+      `${RESET_KEY_HINT} Reset`,
+      `[${confirm.charAt(0).toUpperCase()}${confirm.slice(1)}] Save`,
       "[Esc] Cancel",
-    ].join("  ");
+    ];
+
+    // The count sits in front of the first row, so the first row's budget is
+    // narrower than the frame by exactly that prefix.
+    const prefix = `${count} · `;
+    const rows: string[] = [];
+    let row = "";
+    for (const key of keys) {
+      const next = row ? `${row}  ${key}` : key;
+      const budget = rows.length === 0 ? width - visibleWidth(prefix) : width;
+      if (row && visibleWidth(next) > budget) {
+        rows.push(row);
+        row = key;
+      } else {
+        row = next;
+      }
+    }
+    if (row) rows.push(row);
 
     // No prefix: boxRow's own pad is the one space, exactly like the providers
-    // legend row (`│ 34/44 picked · … │`).
-    return `${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${legend}`)}`;
+    // legend row. The count takes the accent so it is the first thing the eye
+    // lands on; the keys stay dim so they do not compete with the list.
+    return rows.map((line, index) =>
+      index === 0
+        ? `${this.theme.fg("accent", count)}${this.theme.fg("dim", ` · ${line}`)}`
+        : this.theme.fg("dim", line),
+    );
   }
 
   /** Move `ref` one row up/down in the display list. The None row is pinned at
@@ -502,6 +679,30 @@ export class VisionModelSelectorComponent implements Component {
     this.updateList();
   }
 
+  private itemByRef(ref: string): DisplayItem | undefined {
+    return this.allItems.find((i) => i.ref === ref);
+  }
+
+  /** "Gemini 3.8 Flash (Antigravity)", or the raw ref when the model is not in
+   *  the registry right now (stale config), so it stays visible instead of blank. */
+  private refLabel(ref: string): string {
+    const item = this.itemByRef(ref);
+    if (!item) return ref;
+    const provider = providerLabel(item.provider);
+    // Model display names often already carry the vendor — "Gemini 3.8 Flash
+    // (Antigravity)" would otherwise come out as "… (Antigravity) (Antigravity)".
+    return item.modelName.toLowerCase().includes(provider.toLowerCase())
+      ? item.modelName
+      : `${item.modelName} (${provider})`;
+  }
+
+  /** The models behind the primary, in the order they are tried. The primary is
+   *  excluded: it is tried first, so it is not a numbered fallback even when the
+   *  config lists it in the chain. */
+  private chainBehindPrimary(): string[] {
+    return this.orderedFallbacks().filter((r) => r !== this.currentRef);
+  }
+
   /** Fallback refs in list order (models the picker didn't show — e.g. one that
    *  is no longer resolvable — are appended so a config value can't be
    *  silently dropped just by opening the picker). */
@@ -530,12 +731,11 @@ export class VisionModelSelectorComponent implements Component {
   }
 
   private updateList(): void {
-    this.listContainer.clear();
+    this.listEntries = [];
+    const chain = this.chainBehindPrimary();
 
     if (this.filteredItems.length === 0) {
-      this.listContainer.addChild(
-        new Text(this.theme.fg("muted", "No matching models"), 0, 0),
-      );
+      this.listEntries.push({ kind: "line", text: this.theme.fg("muted", "No matching models") });
     }
 
     const startIndex = Math.max(
@@ -550,9 +750,7 @@ export class VisionModelSelectorComponent implements Component {
     // Hidden rows are announced like the providers list, never silently cut: the
     // ↑ count sits above the window, the ↓ count below it.
     if (startIndex > 0) {
-      this.listContainer.addChild(
-        new Text(this.theme.fg("dim", `↑ ${startIndex} more`), 0, 0),
-      );
+      this.listEntries.push({ kind: "line", text: this.theme.fg("dim", `↑ ${startIndex} more`) });
     }
 
     for (let i = startIndex; i < endIndex; i++) {
@@ -561,150 +759,126 @@ export class VisionModelSelectorComponent implements Component {
 
       const isSelected = i === this.selectedIndex;
       const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
+      const labelText = this.rowLabel(item);
 
       let label: string;
       if (item.none) {
-        label = this.theme.fg("warning", item.modelName);
+        label = this.theme.fg("warning", labelText);
       } else {
         // Providers style: the bare `provider/id` ref, no badges — unselected
-        // rows sit in muted, the selected row takes the soft tier in bold.
+        // rows sit in muted, the highlighted row takes the soft tier in bold.
+
+        // The primary keeps the accent even when it is not highlighted, so the
+        // picked model is visible without reading the note column.
         label = isSelected
-          ? softPainter(this.theme, "accent", "accent")(this.theme.bold(item.ref!))
-          : this.theme.fg("muted", item.ref!);
+          ? softPainter(this.theme, "accent", "accent")(this.theme.bold(labelText))
+          : item.ref === this.currentRef
+            ? this.theme.fg("accent", labelText)
+            : this.theme.fg("muted", labelText);
       }
 
-      // Providers-style checkbox: the picked state is chrome, `[x]` accent / `[ ]`
-      // dim — it replaces the old ✓ marker so the primary reads like a checked row.
-      const marked = item.none ? this.currentRef === null : item.ref === this.currentRef;
-      const mark = marked ? this.theme.fg("accent", "[x] ") : this.theme.fg("dim", "[ ] ");
-
-      // Fallback marker — distinct from the primary's check so a model can visibly
-      // be both the primary and a fallback (Sonnet as primary, Gemini as the
-      // chain behind it).
-      const fallbackMark =
-        item.ref && this.fallbacks.has(item.ref)
-          ? this.theme.fg("warning", " ⇆")
-          : "";
-
-      this.listContainer.addChild(new Text(`${prefix}${mark}${label}${fallbackMark}`, 0, 0));
+      // No checkbox: the choice is single, so the row states its role instead
+      // (`✓ primary`, `✓ fallback 1`) and the fact follows in parentheses.
+      const isPrimary = item.ref !== null && item.ref === this.currentRef;
+      // Numbered among the models behind the primary: the primary is tried
+      // first, so it is not `fallback 1` even when the config lists it first.
+      const chainIndex = isPrimary || !item.ref ? -1 : chain.indexOf(item.ref);
+      // The None row counts as picked when nothing is, so it carries the
+      // "(no handoff)" fact the way a picked row carries its own.
+      const isPicked = item.none ? this.currentRef === null : isPrimary || chainIndex >= 0;
+      const role = isPrimary
+        ? this.theme.fg("accent", "✓ primary")
+        : chainIndex >= 0
+          ? this.tone(`✓ fallback ${chainIndex + 1}`)
+          : null;
+      this.listEntries.push({
+        kind: "row",
+        prefix,
+        label,
+        labelText,
+        role,
+        // The parenthetical belongs to a picked row: on every other row it would
+        // repeat `(no thinking)` down the whole list.
+        detail: isPicked ? this.rowDetail(item, isPrimary) : null,
+      });
     }
 
     if (endIndex < this.filteredItems.length) {
-      this.listContainer.addChild(
-        new Text(this.theme.fg("dim", `↓ ${this.filteredItems.length - endIndex} more`), 0, 0),
-      );
+      this.listEntries.push({
+        kind: "line",
+        text: this.theme.fg("dim", `↓ ${this.filteredItems.length - endIndex} more`),
+      });
     }
-
-    this.footerText.setText(this.getFooterText());
   }
 
-  private itemByRef(ref: string): DisplayItem | undefined {
-    return this.allItems.find((i) => i.ref === ref);
+  /** One row, hug-style: the ref, then `✓ primary`, then `(thinking off)`.
+   *  No column padding, so the marker sits right after the ref instead of
+   *  drifting right with the longest ref in the registry. The fact is worth more
+   *  than the ref tail, so a narrow frame truncates the ref first (down to 12
+   *  columns, then drops the parenthetical, then the marker). */
+  private renderList(width: number): string[] {
+    return this.listEntries.map((entry) => {
+      if (entry.kind === "line") return truncateToWidth(entry.text, width, "");
+
+      const head = entry.prefix;
+      const fixed = visibleWidth(head);
+      const labelWidth = visibleWidth(entry.label);
+      const tail = [entry.role, entry.detail].filter(Boolean).join(" ");
+      const tailWidth = tail ? visibleWidth(tail) + 1 : 0;
+
+      // Everything fits: ref, role, fact.
+      if (fixed + labelWidth + tailWidth <= width) {
+        return truncateToWidth(`${head}${entry.label}${tail ? ` ${tail}` : ""}`, width, "");
+      }
+      // Keep the role and the fact, cut the ref tail.
+      if (tail && width - fixed - tailWidth >= 12) {
+        const shown = truncateToWidth(entry.label, width - fixed - tailWidth, "…");
+        return `${head}${shown} ${tail}`;
+      }
+      // Keep the role only.
+      const roleWidth = entry.role ? visibleWidth(entry.role) + 1 : 0;
+      if (entry.role && width - fixed - roleWidth >= 12) {
+        const shown = truncateToWidth(entry.label, width - fixed - roleWidth, "…");
+        return `${head}${shown} ${entry.role}`;
+      }
+      return truncateToWidth(`${head}${entry.label}${entry.role ? ` ${entry.role}` : ""}`, width, "");
+    });
   }
 
-  /** "Gemini 3.8 Flash (Antigravity)", or the raw ref when it isn't in the
-   *  registry right now (stale config) so it stays visible instead of blank. */
-  private refLabel(ref: string): string {
-    const item = this.itemByRef(ref);
-    if (!item) return ref;
-    const provider = providerLabel(item.provider);
-    // Model display names often already carry the vendor — "Gemini 3.8 Flash
-    // (Antigravity)" would otherwise come out as "… (Antigravity) (Antigravity)".
-    return item.modelName.toLowerCase().includes(provider.toLowerCase())
-      ? item.modelName
-      : `${item.modelName} (${provider})`;
+  /** The plain label a row renders before paint and padding. */
+  private rowLabel(item: DisplayItem): string {
+    return item.none ? "None" : item.ref!;
   }
 
-  /** The detail pane summarises the *configuration* (primary, failover chain
-   *  and toggles) rather than the highlighted row, so each space / tab
-   *  press shows exactly what will be saved.
-   *
-   *  Built per frame rather than cached in a child component because the
-   *  label/value split only pays off once the width is known: a long fallback
-   *  chain then wraps under its own value instead of spilling to column 0. */
-  private detailLines(width: number): string[] {
-    const out: string[] = [];
-
-    // Arnative status-panel rows: `Label · STATUS | detail`, the label column
-    // padded to the widest label so every `·` divider sits in one column, one
-    // status word per row (success = on, muted = off). A long detail wraps
-    // under its own value column instead of spilling to column 0.
-    const labels = {
-      vision: "  Vision-capable ✦",
-      fallback: "  Fallback ⇆",
-      thinking: "  Thinking",
-      async: "  Async pasted-path fallback",
-    };
-    const col = Math.max(...Object.values(labels).map((l) => visibleWidth(l)));
-
-    const row = (labelText: string, status: string, color: ThemeColor, detail: string) => {
-      const head =
-        this.theme.fg("dim", labelText) +
-        " ".repeat(col - visibleWidth(labelText)) +
-        this.theme.fg("dim", " · ") +
-        this.theme.fg(color, status);
-      // Continuations clear the " | " separator so they line up with the detail.
-      const indent = " ".repeat(visibleWidth(head) + 3);
-      const wrapped = wrapTextWithAnsi(detail, Math.max(8, width - indent.length));
-      out.push(`${head}${detail ? this.theme.fg("dim", " | ") + (wrapped[0] ?? "") : ""}`);
-      for (const extra of wrapped.slice(1)) out.push(indent + extra);
-    };
-
-    // Free-standing sentence (warning / transient notice), hanging-indented
-    // under its own first word.
-    const note = (text: string) => {
-      const indent = "    ";
-      wrapTextWithAnsi(text, Math.max(8, width - indent.length)).forEach(
-        (part, i) => out.push(i === 0 ? part : indent + part),
-      );
-    };
-
-    row(
-      labels.vision,
-      this.currentRef ? "ON" : "OFF",
-      this.currentRef ? "success" : "muted",
-      this.currentRef
-        ? this.refLabel(this.currentRef)
-        : this.theme.fg("muted", "none — vision watcher disabled"),
-    );
-
-    const chain = this.orderedFallbacks();
-    row(
-      labels.fallback,
-      chain.length ? "ON" : "OFF",
-      chain.length ? "success" : "muted",
-      chain.length ? `${chain.map((r) => this.refLabel(r)).join(" → ")} (max ${MAX_FALLBACKS})` : "",
-    );
-
-    row(
-      labels.thinking,
-      this.thinking ? "ON" : "OFF",
-      this.thinking ? "success" : "muted",
-      this.thinking ? this.thinkingLevel : "",
-    );
-
-    row(
-      labels.async,
-      this.asyncClipboardHandoff ? "ON" : "OFF",
-      this.asyncClipboardHandoff ? "success" : "muted",
-      ASYNC_KEY_HINT,
-    );
-
-    // The warning follows the *highlighted* row: it answers "what happens if I
-    // pick this model", which is also how you'd notice it while browsing.
-    const highlighted = this.filteredItems[this.selectedIndex];
-    if (this.thinking && highlighted && !highlighted.none && !highlighted.reasoning) {
-      note(
-        this.theme.fg(
-          "warning",
-          `  Warning: ${highlighted.modelId} declares no reasoning — thinking will be ignored`,
-        ),
-      );
+  /** What the row means right now, in the note column: its role (primary, chain
+   *  position) and whether thinking can do anything for it. Both are facts an
+   *  arnative row would state instead of hiding in a side panel. */
+  /** The fact in parentheses after the role. It belongs to the primary (the
+   *  model that will actually be asked) and to any model that cannot think at
+   *  all, so the row says that without opening a detail panel. */
+  private rowDetail(item: DisplayItem, isPrimary: boolean): string | null {
+    if (item.none) {
+      return this.currentRef === null ? this.theme.fg("dim", "(no handoff)") : null;
     }
+    const fact = !item.reasoning
+      ? "no thinking"
+      : isPrimary
+        ? this.thinking
+          ? `thinking ${this.thinkingLevel}`
+          : "thinking off"
+        : null;
+    return fact ? this.theme.fg("dim", `(${fact})`) : null;
+  }
 
-    if (this.notice) note(this.theme.fg("warning", `  ${this.notice}`));
-
-    return out;
+  /** The arnative primary tone for a chain marker. pi's theme tokens have no
+   *  `primary` slot, so use the theme's own when it declares one and fall back
+   *  to `warning`, the same warm hue in every built-in theme. */
+  private tone(text: string): string {
+    try {
+      return this.theme.fg("primary" as ThemeColor, text);
+    } catch {
+      return this.theme.fg("warning", text);
+    }
   }
 
   private save(): void {

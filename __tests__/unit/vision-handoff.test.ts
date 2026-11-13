@@ -126,6 +126,13 @@ describe("normalizeConfig", () => {
     expect(cfg.cacheMax).toBe(DEFAULT_CONFIG.cacheMax);
   });
 
+  it("accepts a request-body byte budget, including 0 for 'never split'", () => {
+    expect(normalizeConfig({ maxRequestBytes: 262_144 }).maxRequestBytes).toBe(262_144);
+    expect(normalizeConfig({ maxRequestBytes: 0 }).maxRequestBytes).toBe(0);
+    expect(normalizeConfig({ maxRequestBytes: -1 }).maxRequestBytes).toBe(DEFAULT_CONFIG.maxRequestBytes);
+    expect(normalizeConfig({ maxRequestBytes: "big" }).maxRequestBytes).toBe(DEFAULT_CONFIG.maxRequestBytes);
+  });
+
   it("maxTokens is optional: undefined by default (no artificial cap)", () => {
     expect(DEFAULT_CONFIG.maxTokens).toBeUndefined();
     expect(normalizeConfig({}).maxTokens).toBeUndefined();
@@ -569,6 +576,17 @@ describe("isImageNotSupportedError", () => {
       ),
     ).toBe(true);
     expect(isImageNotSupportedError("Model only accepts text")).toBe(true);
+  });
+
+  it("matches an aggregator that silently routes images to its own recognizer", () => {
+    // Remote Magpie answers a text-only model that received an image with this
+    // 502 instead of a 400, so the recovery path must recognize it too.
+    expect(
+      isImageNotSupportedError(
+        '502: {"message":"model \\"remote-magpie/devin/swe-2-flash\\" can\'t see images, and remote-magpie/enclave/cyberouter/glm-5.3-flash couldn\'t describe the image for it: Remote Magpie: Request Entity Too Large"}',
+      ),
+    ).toBe(true);
+    expect(isImageNotSupportedError("This model cannot see images.")).toBe(true);
   });
 
   it("does not match unrelated errors", () => {

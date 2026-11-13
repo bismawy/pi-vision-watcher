@@ -38,6 +38,7 @@ import type {
   ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { resizeImage } from "@earendil-works/pi-coding-agent";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import {
   batchUserPrompt,
@@ -197,11 +198,80 @@ export interface DescriberDeps {
 /** The result of a batched describer call: per-image raw descriptions keyed by hash. */
 export type BatchResult = Map<string, string>;
 
+/** Per-image request overhead outside the base64 payload: the JSON block
+ *  wrapper, the `data:image/…;base64,` prefix some providers add, and the batch
+ *  delimiter prose. One kilobyte is generous against a ~700 KB budget. */
+const PER_IMAGE_REQUEST_OVERHEAD = 1024;
+
+/** Reserve for the prompt text and JSON envelope of one request body. */
+const PROMPT_REQUEST_RESERVE = 8 * 1024;
+
+/** Largest base64 payload one image may occupy so a request carrying only that
+ *  image still fits `budget`. `0` means "no limit" (budget disabled). */
+export function perImageBudget(budget: number): number {
+  if (budget <= 0) return 0;
+  return Math.max(16 * 1024, budget - PROMPT_REQUEST_RESERVE - PER_IMAGE_REQUEST_OVERHEAD);
+}
+
+/** Shrink any image that alone exceeds `maxBytes`, so an oversized attachment
+ *  cannot fail its own request. pi resizes images when they enter history, but
+ *  the describer can see the raw bytes first (its `context` hook runs before the
+ *  encode lands) and a pasted or pre-existing image may never be re-encoded.
+ *  `maxBytes <= 0` skips the pass. A failed resize keeps the original bytes and
+ *  lets the provider reject them, so the real error is surfaced, not hidden. */
+async function fitImages(images: ExtractedImage[], maxBytes: number): Promise<ExtractedImage[]> {
+  if (maxBytes <= 0) return images;
+  return Promise.all(
+    images.map(async (img) => {
+      if (img.data.length <= maxBytes) return img;
+      const resized = await resizeImage(Buffer.from(img.data, "base64"), img.mimeType, {
+        maxWidth: 2048,
+        maxHeight: 2048,
+        maxBytes,
+        jpegQuality: 80,
+      });
+      return resized ? { data: resized.data, mimeType: resized.mimeType } : img;
+    }),
+  );
+}
+
+/** Split a batch into as few order-preserving groups as fit `budget` base64
+ *  bytes each. An image larger than the budget gets its own group: it cannot be
+ *  split further, and pi's ingest resize should already have kept it small.
+ *  `budget <= 0` means "never split" — one group with every image. */
+export function splitByByteBudget<T extends { img: ExtractedImage }>(misses: T[], budget: number): T[][] {
+  if (misses.length === 0) return [];
+  if (budget <= 0 || misses.length === 1) return [misses];
+  const groups: T[][] = [];
+  let current: T[] = [];
+  let bytes = 0;
+  for (const miss of misses) {
+    const cost = miss.img.data.length + PER_IMAGE_REQUEST_OVERHEAD;
+    if (current.length > 0 && bytes + cost > budget) {
+      groups.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(miss);
+    bytes += cost;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
 /** Describe N images with ONE batched `completeSimple()` call and split the response
  *  back into per-image descriptions. Returns a map keyed by image hash; an
  *  image whose section failed to parse is omitted (the caller treats omission
  *  as "description unavailable"). On a genuine call failure (auth, abort,
  *  empty) the map is empty and `deps.setLastError` records the reason.
+ *
+ *  A N-image batch is split into groups that each fit `cfg.maxRequestBytes`.
+ *  Aggregator proxies cap the request BODY (prompt text plus base64 images),
+ *  not the model context, so an oversized body is rejected outright (Remote
+ *  Magpie: HTTP 413 at ~1 MB) and every description in the batch is lost. An
+ *  image that alone exceeds the budget is re-encoded down first; the remaining
+ *  images run in sequence, one call per group, so a large read costs a few
+ *  requests instead of one fatal one.
  *
  *  A failed delimiter-parse is a failed BATCH, not a failed description: the
  *  unparsed images fall back to parallel single-image calls (no delimiters to
@@ -217,20 +287,30 @@ export async function runBatch(
   turnSignal?: AbortSignal,
 ): Promise<BatchResult> {
   const out: BatchResult = new Map();
+  // Fit each image to the budget BEFORE grouping: an image above it would 413 on
+  // its own, and grouping cannot help a body dominated by one oversized image.
+  const images = await fitImages(
+    misses.map((m) => m.img),
+    perImageBudget(cfg.maxRequestBytes),
+  );
+  const items = images.map((img, i) => ({ img, hash: misses[i].hash }));
   // Parse and fallback run inside callVision's try so a throw there is logged as
   // a batch failure and the partially filled map is still returned.
-  await callVision(
-    misses.map((m) => m.img),
-    misses.map((m) => m.hash),
-    "batch",
-    userPrompt,
-    visionModel,
-    modelRegistry,
-    cfg,
-    deps,
-    (text, truncated) => fillBatch(out, text, truncated, misses, userPrompt, visionModel, modelRegistry, cfg, deps, turnSignal),
-    turnSignal,
-  );
+  for (const group of splitByByteBudget(items, cfg.maxRequestBytes)) {
+    await callVision(
+      group.map((m) => m.img),
+      group.map((m) => m.hash),
+      "batch",
+      userPrompt,
+      visionModel,
+      modelRegistry,
+      cfg,
+      deps,
+      (text, truncated) =>
+        fillBatch(out, text, truncated, group, userPrompt, visionModel, modelRegistry, cfg, deps, turnSignal),
+      turnSignal,
+    );
+  }
   return out;
 }
 

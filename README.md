@@ -84,6 +84,7 @@ pi --extension ./vision-watcher.ts
   "prewarmPastedImages": false,
   "asyncClipboardHandoff": false,
   "maxTokens": null,
+  "maxRequestBytes": 700000,
   "cacheMax": 50,
   "maxDescriptionLines": 0
 }
@@ -92,6 +93,8 @@ pi --extension ./vision-watcher.ts
 Most fields have sane defaults — `visionModel` is the only one you normally set.
 
 `fallbackModels` is the failover chain: when the primary describer fails (timeout, rate limit, auth), each entry is tried **in order** until one returns a description. The picker caps the chain at 3 entries (`tab`). Set it from the picker instead of hand-editing the file.
+
+`maxRequestBytes` (default `700000`) is the byte budget for one describer request body, prompt text and base64 images together. Aggregator proxies such as Remote Magpie reject a body near 1 MB with HTTP 413 no matter how large the model context is, so an image above the budget is re-encoded down and the batch is split into sequential calls that each fit. Set it to your provider's limit; `0` disables the budget.
 
 </details>
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- An image batch no longer leaves as one oversized request body. Aggregator proxies cap the whole
+  body (Remote Magpie answers HTTP 413 near 1 MB), and that failure cost every description in the
+  batch. An image above the budget is re-encoded down first, and the rest are grouped into
+  sequential calls that each fit `maxRequestBytes` (default `700000`; `0` disables splitting).
+- A provider that rejects an image for a text-only model with a "can't see images" error now triggers
+  the existing text-only recovery. The model is marked text-only and its images hand off on the next
+  turn, rather than the rejection being logged as an unrelated failure.
+
 ## [1.3.0] - 2026-10-24
 
 ### Changed

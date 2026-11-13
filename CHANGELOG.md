@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.1] - 2026-11-13
 
 ### Fixed
 - An image batch no longer leaves as one oversized request body. Aggregator proxies cap the whole

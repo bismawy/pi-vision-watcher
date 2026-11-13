@@ -97,6 +97,18 @@ export function describeTimeoutMs(imageCount: number, baseTimeout: number = DESC
   return baseTimeout * Math.max(1, imageCount);
 }
 
+/** Default byte budget for ONE describer request body, images included.
+ *
+ *  Aggregator proxies cap the whole JSON body (text plus base64 images), not the
+ *  model context: Remote Magpie answers a 1.1 MB body with HTTP 413. A base64
+ *  image is 4/3 its raw size, so one 2000px screenshot can exceed that cap alone
+ *  — and a batched call multiplies it by the image count. The describer splits a
+ *  batch into groups that each fit this budget, so a multi-image read degrades
+ *  into a few calls instead of one 413 that loses every description. Override it
+ *  with `maxRequestBytes` when the provider takes a different limit; `0` keeps
+ *  the old always-one-call behaviour. */
+export const DEFAULT_MAX_REQUEST_BYTES = 700_000;
+
 /**
  * Default cap on the number of lines kept from a description before truncation.
  *
@@ -178,6 +190,11 @@ export interface VisionHandoffConfig {
    *  slow primary; raise it for a high-latency vision model that times out
    *  spuriously. */
   describeTimeoutMs: number;
+  /** Byte budget for ONE describer request body (prompt text + base64 images).
+   *  Images are grouped into as few calls as fit this budget; a single image
+   *  above it still gets its own call. `0` disables splitting. Defaults to
+   *  {@link DEFAULT_MAX_REQUEST_BYTES}. */
+  maxRequestBytes: number;
   /** Max images kept in the in-memory description cache. */
   cacheMax: number;
   /**
@@ -212,6 +229,7 @@ export const DEFAULT_CONFIG: VisionHandoffConfig = {
   asyncClipboardHandoff: false,
   maxTokens: undefined,
   describeTimeoutMs: DESCRIBE_TIMEOUT_MS,
+  maxRequestBytes: DEFAULT_MAX_REQUEST_BYTES,
   cacheMax: DEFAULT_CACHE_MAX,
   maxDescriptionLines: DEFAULT_MAX_DESCRIPTION_LINES,
   thinking: false,
@@ -242,7 +260,7 @@ export function formatModelRef(provider: string, id: string): string {
  *  passes the autoHandoff vision check, so the raw image reaches the provider
  *  and 400s — we learn from that error and force handoff for the model. */
 export function isImageNotSupportedError(text: string): boolean {
-  return /not support (?:the )?image|image[s]? (?:input[s]? )?(?:is |are )?not supported|does not accept image|unsupported (?:image|multimodal)|only (?:supports|accepts) text|unsupported content type[\s\S]{0,40}image/i.test(
+  return /not support (?:the )?image|image[s]? (?:input[s]? )?(?:is |are )?not supported|does not accept image|unsupported (?:image|multimodal)|only (?:supports|accepts) text|unsupported content type[\s\S]{0,40}image|can(?:not|'t) see (?:the )?images?/i.test(
     text,
   );
 }
@@ -374,6 +392,10 @@ export function normalizeConfig(raw: unknown): VisionHandoffConfig {
     obj.maxDescriptionLines >= 0
   ) {
     base.maxDescriptionLines = Math.floor(obj.maxDescriptionLines);
+  }
+  // maxRequestBytes: non-negative finite integer. 0 = never split a batch.
+  if (typeof obj.maxRequestBytes === "number" && Number.isFinite(obj.maxRequestBytes) && obj.maxRequestBytes >= 0) {
+    base.maxRequestBytes = Math.floor(obj.maxRequestBytes);
   }
   if (typeof obj.prompt === "string" && obj.prompt.trim()) base.prompt = obj.prompt;
   if (typeof obj.userPromptPrefix === "string") base.userPromptPrefix = obj.userPromptPrefix;

@@ -20,7 +20,7 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({
   complete: (...args: unknown[]) => complete(...(args as Parameters<typeof complete>)),
 }));
 
-import { runBatch, describeSingle, resolveMaxTokens, type DescriberDeps } from "../../src/describer.js";
+import { runBatch, describeSingle, perImageBudget, resolveMaxTokens, splitByByteBudget, type DescriberDeps } from "../../src/describer.js";
 import { DESCRIPTION_TRUNCATED_MARKER, type ExtractedImage, type VisionHandoffConfig } from "../../src/index.js";
 import { imageHash } from "../../src/image.js";
 import { getErrorLogPath, type VisionErrorLogEntry } from "../../src/error-log.js";
@@ -77,6 +77,7 @@ const cfg: VisionHandoffConfig = {
   asyncClipboardHandoff: false,
   maxTokens: undefined,
   describeTimeoutMs: 45_000,
+    maxRequestBytes: 700_000,
   cacheMax: 50,
   maxDescriptionLines: 0,
   thinking: false,
@@ -307,6 +308,7 @@ describe("resolveMaxTokens", () => {
     asyncClipboardHandoff: false,
     maxTokens: undefined,
     describeTimeoutMs: 45_000,
+    maxRequestBytes: 700_000,
     cacheMax: 50,
     maxDescriptionLines: 0,
     thinking: false,
@@ -414,6 +416,93 @@ describe("runBatch stopReason handling", () => {
     const out = await runBatch([{ img: a, hash: ha }], "", visionModel, modelRegistry, cfg, deps);
     expect(out.size).toBe(0);
     expect(deps.setLastError).toHaveBeenCalled();
+  });
+});
+
+describe("request-body byte budget (splitByByteBudget / runBatch)", () => {
+  beforeEach(() => completeSimple.mockReset());
+
+  it("keeps one group when the batch fits the budget", () => {
+    const misses = [img("A"), img("B")].map((i) => ({ img: i, hash: imageHash(i.mimeType, i.data) }));
+    expect(splitByByteBudget(misses, 700_000)).toHaveLength(1);
+    expect(splitByByteBudget(misses, 700_000)[0]).toHaveLength(2);
+  });
+
+  it("splits into order-preserving groups that each fit, and never drops an image", () => {
+    const misses = ["AAAA", "BBBB", "CCCC", "DDDD"].map((d) => {
+      const i = img(d);
+      return { img: i, hash: imageHash(i.mimeType, i.data) };
+    });
+    // 4 + 1024 overhead per image -> budget of 2500 fits exactly two per group.
+    const groups = splitByByteBudget(misses, 2_500);
+    expect(groups.map((g) => g.length)).toEqual([2, 2]);
+    expect(groups.flat().map((m) => m.img.data)).toEqual(["AAAA", "BBBB", "CCCC", "DDDD"]);
+  });
+
+  it("gives an oversized single image its own group instead of dropping it", () => {
+    const big = img("X".repeat(5_000));
+    const misses = [{ img: big, hash: imageHash(big.mimeType, big.data) }];
+    const groups = splitByByteBudget(misses, 1_000);
+    expect(groups).toHaveLength(1);
+    expect(groups[0][0].img).toBe(big);
+  });
+
+  it("treats budget 0 as 'never split'", () => {
+    const misses = ["AA", "BB", "CC"].map((d) => {
+      const i = img(d);
+      return { img: i, hash: imageHash(i.mimeType, i.data) };
+    });
+    expect(splitByByteBudget(misses, 0)).toHaveLength(1);
+  });
+
+  it("shares every description back to one map when the batch is split", async () => {
+    const imgs = ["AAA", "BBB", "CCC"].map((d) => img(d));
+    const misses = imgs.map((i) => ({ img: i, hash: imageHash(i.mimeType, i.data) }));
+    // One image per call: plain text, no delimiters to parse.
+    completeSimple.mockResolvedValueOnce(fakeResponse({ text: "first" }));
+    completeSimple.mockResolvedValueOnce(fakeResponse({ text: "second" }));
+    completeSimple.mockResolvedValueOnce(fakeResponse({ text: "third" }));
+
+    const out = await runBatch(misses, "", visionModel, modelRegistry, { ...cfg, maxRequestBytes: 1_000 }, makeDeps());
+
+    expect(completeSimple).toHaveBeenCalledTimes(3);
+    expect(misses.map((m) => out.get(m.hash))).toEqual(["first", "second", "third"]);
+  });
+
+  it("reserves room for the prompt and envelope in the per-image budget", () => {
+    expect(perImageBudget(0)).toBe(0); // disabled
+    expect(perImageBudget(700_000)).toBeLessThan(700_000);
+    expect(perImageBudget(700_000)).toBeGreaterThan(690_000);
+    expect(perImageBudget(1_000)).toBe(16 * 1024); // never below the floor
+  });
+
+  it("passes an unshrinkable oversized image through instead of dropping it", async () => {
+    // Not a decodable image: resizeImage returns null, so the original bytes go
+    // to the provider and its real error is surfaced.
+    const big = img("A".repeat(20_000));
+    const miss = { img: big, hash: imageHash(big.mimeType, big.data) };
+    completeSimple.mockResolvedValueOnce(fakeResponse({ text: "described" }));
+
+    const out = await runBatch([miss], "", visionModel, modelRegistry, { ...cfg, maxRequestBytes: 1_000 }, makeDeps());
+
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+    const content = completeSimple.mock.calls[0][1].messages[0].content as { type: string; data?: string }[];
+    expect(content.find((b) => b.type === "image")?.data).toHaveLength(20_000);
+    expect(out.get(miss.hash)).toBe("described");
+  });
+
+  it("keeps one call when the batch fits the configured budget", async () => {
+    const a = img("AAA");
+    const b = img("BBB");
+    const misses = [a, b].map((i) => ({ img: i, hash: imageHash(i.mimeType, i.data) }));
+    completeSimple.mockResolvedValueOnce(
+      fakeResponse({ text: ["<<<IMAGE 1>>>", "one", "<<<END>>>", "<<<IMAGE 2>>>", "two", "<<<END>>>"].join("\n") }),
+    );
+
+    const out = await runBatch(misses, "", visionModel, modelRegistry, cfg, makeDeps());
+
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+    expect(misses.map((m) => out.get(m.hash))).toEqual(["one", "two"]);
   });
 });
 

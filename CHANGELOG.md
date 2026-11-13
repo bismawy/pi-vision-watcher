@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-13
+
 ### Changed
 - The `/vision-watcher` picker reads like the arnative providers dashboard. A header names the whole
   configuration in model names (`Primary`, `Fallback` chain, `Thinking` level) so the picked models stay

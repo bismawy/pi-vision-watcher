@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `/vision-watcher` picker reads like the arnative providers dashboard. A header names the whole
+  configuration in model names (`Primary`, `Fallback` chain, `Thinking` level) so the picked models stay
+  visible even when their rows scroll out of view, instead of the old four-row status panel.
+  The per-row checkbox is gone: the choice is single, so a box promised multi-select. Each row hugs its ref
+  with a role marker instead: `✓ primary` in accent, `✓ fallback 1` in the primary tone, then the fact in
+  parentheses (`(thinking off)`, `(no thinking)`) in dim. The primary row keeps the accent colour when it is
+  not highlighted.
+- `a` toggles async paste handoff and `r` resets the failover chain; `alt+a` / `ctrl+alt+a` and
+  `ctrl+shift+r` stay as aliases. Letters are commands, so a bare key is free: only `/` hands the keyboard
+  to the filter. The legend shows the new hints.
+- `/` opens the filter; `enter` or `esc` closes it and keeps the query, so letters are commands again and a
+  multi-word query such as `gemini 3.8` stays typeable. Typing already owns the key, so `space` toggles the
+  primary whether or not a query is kept.
+- The legend packs into rows that fit the frame and states each toggle next to its key (`[A] Async on`).
+  A narrow row truncates the ref first, then the parenthetical, and only then the role marker.
+
 ## [1.3.1] - 2026-11-13
 
 ### Fixed

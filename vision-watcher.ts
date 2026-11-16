@@ -40,6 +40,7 @@ import {
   DESCRIBE_TIMEOUT_MS,
   extractImageFromBlock,
   formatModelRef,
+  isEffectiveVisionModel,
   isThinkingLevel,
   assistantErrorText,
   isImageNotSupportedError,
@@ -55,6 +56,7 @@ import {
   type ExtractedImage,
   type VisionHandoffConfig,
 } from "./src/index.js";
+import { RouterCapabilityCache } from "./src/router.js";
 import {
   USAGE_ENTRY_TYPE,
   USAGE_EVENT_CHANNEL,
@@ -99,6 +101,67 @@ let editorInstalled = false;
 
 let visionModelCache: { ref: string; model: Model<Api> } | null = null;
 let visionModelUnresolvedRef: string | null = null;
+const routerCache = new RouterCapabilityCache();
+const pastedPathImages = new Map<string, Promise<ExtractedImage | null>>();
+
+function preparePastedPathImage(path: string): Promise<ExtractedImage | null> {
+  const existing = pastedPathImages.get(path);
+  if (existing) {
+    pastedPathImages.delete(path);
+    pastedPathImages.set(path, existing);
+    return existing;
+  }
+  const task = (async (): Promise<ExtractedImage | null> => {
+    try {
+      const read = readImageBuffer(path);
+      if (!read) return null;
+      return await resolvePrewarmImage(read.buf, read.mimeType, resizeImage);
+    } catch {
+      return null;
+    }
+  })();
+  pastedPathImages.set(path, task);
+  const cap = Math.max(50, config.cacheMax);
+  while (pastedPathImages.size > cap) {
+    const oldest = pastedPathImages.keys().next().value;
+    if (oldest === undefined) break;
+    pastedPathImages.delete(oldest);
+  }
+  return task;
+}
+
+function readExplicitTextOnlyOverrides(): Set<string> {
+  const out = new Set<string>();
+  const path = join(getAgentDir(), "models.json");
+  if (!existsSync(path)) return out;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as {
+      providers?: Record<string, { modelOverrides?: Record<string, { input?: unknown }> }>;
+    };
+    const providers = raw?.providers;
+    if (!providers || typeof providers !== "object") return out;
+    for (const [providerId, provider] of Object.entries(providers)) {
+      const overrides = provider?.modelOverrides;
+      if (!overrides || typeof overrides !== "object") continue;
+      for (const [modelId, ov] of Object.entries(overrides)) {
+        if (Array.isArray(ov?.input) && !ov.input.includes("image")) {
+          out.add(formatModelRef(providerId, modelId));
+        }
+      }
+    }
+  } catch {
+    // Corrupt or unreadable models.json — fall back cleanly.
+  }
+  return out;
+}
+
+async function ensureRouterCapabilitiesForModel(
+  ctx: { modelRegistry?: Partial<ModelRegistry> },
+  model: { provider?: string } | undefined | null,
+): Promise<void> {
+  if (!model?.provider || routerCache.hasFresh(model.provider)) return;
+  await routerCache.refreshProviders(ctx.modelRegistry, { providers: [model.provider] });
+}
 
 interface PendingAsyncClipboardHandoff {
   token: symbol;
@@ -214,8 +277,16 @@ function resolveVisionModel(modelRegistry: ModelRegistry, ref: string): Model<Ap
   if (!parsed) return null;
   const model = modelRegistry.find(parsed.provider, parsed.id);
   if (!model) return null;
-  visionModelCache = { ref, model };
-  return model;
+  // If router /models metadata confirmed this model supports image input while
+  // models.json omitted `input`, expose `"image"` on the describer clone so
+  // pi-ai adapters don't downgrade or strip image blocks.
+  const cap = routerCache.get(model.provider, model.id);
+  const resolved =
+    !isVisionModel(model) && isEffectiveVisionModel(model, cap)
+      ? ({ ...model, input: ["text", "image"] } as Model<Api>)
+      : model;
+  visionModelCache = { ref, model: resolved };
+  return resolved;
 }
 
 /** True when the primary vision model resolves, or — failing that — at least
@@ -246,18 +317,21 @@ function isConfigured(cfg: VisionHandoffConfig): boolean {
 }
 
 function isHandoffTarget(
-  model: { provider?: string; id?: string; input?: ("text" | "image")[] } | undefined | null,
+  model: { provider?: string; id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
   cfg: VisionHandoffConfig,
 ): boolean {
   if (!model || !model.provider || !model.id) return false;
   const ref = formatModelRef(model.provider, model.id);
   if (cfg.handoffModels.includes(ref)) return true;
-  // Aggregators often mark DeepSeek V4 as vision; the backend 400s on images.
-  // Treat as text-only so the FIRST send is handed off — waiting for the 400
-  // is too late. Persist the models.json override separately so /model agrees.
-  if (cfg.autoHandoff && isKnownTextOnlyFalselyVision(model.id)) return true;
-  if (cfg.autoHandoff && !isVisionModel(model)) return true;
-  return false;
+  if (!cfg.autoHandoff) return false;
+  // Pi itself strips image blocks when model.input omits "image", so handoff
+  // must always run whenever the registry entry is non-vision.
+  if (!isVisionModel(model)) return true;
+  // Aggregators/routers (Magpie, 9router, omnirouter) often mark text-only
+  // models as ["text", "image"] in models.json. Check router /models metadata
+  // and false-vision heuristics so FIRST send hands off.
+  const cap = routerCache.get(model.provider, model.id);
+  return !isEffectiveVisionModel(model, cap);
 }
 
 /** Whether paste-time prewarm should fire for a text change right now: the
@@ -277,9 +351,7 @@ function shouldPrewarmPaste(): boolean {
  *  tradeoff of the opt-in). If the user submits before this dispatch fires,
  *  before_agent_start overwrites the prompt — a benign bonus, not a bug. */
 function prewarmClipboardPath(path: string, modelRegistry: ModelRegistry): void {
-  const read = readImageBuffer(path);
-  if (!read) return;
-  resolvePrewarmImage(read.buf, read.mimeType, resizeImage)
+  preparePastedPathImage(path)
     .then((img) => {
       if (!img) return;
       // Paste happens while the agent is idle (no run → no live signal).
@@ -350,14 +422,19 @@ function fixModelInputTextOnly(ctx: ExtensionContext, providerId: string, modelI
 }
 
 /** Persist `input: ["text"]` for a model that falsely declares image input.
- *  No-op if the model is already text-only or isn't a known false-vision id. */
+ *  No-op if the model is already text-only or isn't detected as text-only. */
 function persistFalseVisionOverride(
   ctx: ExtensionContext,
-  model: { provider?: string; id?: string; input?: ("text" | "image")[] } | undefined | null,
+  model: { provider?: string; id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
 ): boolean {
   if (!model?.provider || !model.id) return false;
-  if (!isKnownTextOnlyFalselyVision(model.id)) return false;
   if (!isVisionModel(model)) return false;
+  const cap = routerCache.get(model.provider, model.id);
+  const label = [model.name, cap?.label]
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .join(" ");
+  const isFalseVision = cap?.vision === false || isKnownTextOnlyFalselyVision(model.id, label);
+  if (!isFalseVision) return false;
   return fixModelInputTextOnly(ctx, model.provider, model.id);
 }
 
@@ -464,16 +541,27 @@ export default function (pi: ExtensionAPI) {
     config = readConfig();
     visionModelCache = null;
     visionModelUnresolvedRef = null;
+    routerCache.clear();
+    pastedPathImages.clear();
     warnedHashes.clear();
     loader.reset();
     currentModel = ctx.model;
     persistFalseVisionOverride(ctx, ctx.model);
     installPrewarmEditor(ctx);
+    // Warm router /models metadata in the background so /vision-watcher and
+    // active false-vision detection stay accurate without slowing startup.
+    void routerCache
+      .refreshProviders(ctx.modelRegistry)
+      .then(() => {
+        persistFalseVisionOverride(ctx, currentModel);
+      })
+      .catch(() => {});
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     cancelAsyncClipboardHandoff();
     if (!isConfigured(config)) return;
+    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
     if (!isHandoffTarget(ctx.model, config)) return;
 
     // Fresh turn → fresh turn-abort controller. `before_agent_start` fires
@@ -541,9 +629,7 @@ export default function (pi: ExtensionAPI) {
     const preparedClipboardImages = clipboardPaths.map(
       async (path): Promise<PreparedClipboardImage | null> => {
         try {
-          const read = readImageBuffer(path);
-          if (!read) return null;
-          const image = await resolvePrewarmImage(read.buf, read.mimeType, resizeImage);
+          const image = await preparePastedPathImage(path);
           if (!image) return null;
           const description = loader.loadDescription(image);
           description.catch(() => {});
@@ -605,6 +691,7 @@ export default function (pi: ExtensionAPI) {
     const content = event.content;
     if (!Array.isArray(content)) return;
 
+    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
     // Collect image blocks in this read result. (The read tool emits image
     // blocks even for non-vision models — they reach here untouched.)
     if (!isHandoffTarget(ctx.model, config)) return;
@@ -731,19 +818,67 @@ export default function (pi: ExtensionAPI) {
     if (!Array.isArray(messages)) return;
 
     const byHash = new Map<string, ExtractedImage>();
-    let anyImage = false;
+    const msgImageHashes = new Map<Record<string, unknown>, Set<string>>();
+    const userPastedPaths: Array<{ msg: Record<string, unknown>; path: string }> = [];
+
     for (const msg of messages) {
       const content = msg.content;
-      if (!Array.isArray(content)) continue;
-      for (const block of content) {
-        const img = extractImageFromBlock(block);
-        if (!img) continue;
-        anyImage = true;
-        byHash.set(imageHash(img.mimeType, img.data), img);
+      const hashes = new Set<string>();
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const img = extractImageFromBlock(block);
+          if (!img) continue;
+          const h = imageHash(img.mimeType, img.data);
+          hashes.add(h);
+          byHash.set(h, img);
+        }
+      }
+      if (hashes.size > 0) msgImageHashes.set(msg, hashes);
+
+      // When asyncClipboardHandoff is off (default), forward pasted temp-dir
+      // clipboard image paths directly in the user message on Turn 1 so the
+      // active text-only model receives descriptions without needing to call read.
+      if (!config.asyncClipboardHandoff && msg.role === "user") {
+        const text =
+          typeof content === "string"
+            ? content
+            : Array.isArray(content)
+              ? content
+                  .filter((b): b is { type: string; text: string } => !!b && typeof b === "object" && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string")
+                  .map((b) => b.text)
+                  .join("\n")
+              : "";
+        if (text) {
+          for (const path of findPastedImagePaths(text)) {
+            userPastedPaths.push({ msg, path });
+          }
+        }
       }
     }
-    if (!anyImage) return;
+
+    if (byHash.size === 0 && userPastedPaths.length === 0) return;
+    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
     if (!isHandoffTarget(ctx.model, config)) return;
+
+    const pastedInjections: Array<{ msg: Record<string, unknown>; path: string; hash: string }> = [];
+    if (userPastedPaths.length > 0) {
+      const resolved = await Promise.all(
+        userPastedPaths.map(async ({ msg, path }) => ({
+          msg,
+          path,
+          img: await preparePastedPathImage(path),
+        })),
+      );
+      for (const item of resolved) {
+        if (!item.img) continue;
+        const h = imageHash(item.img.mimeType, item.img.data);
+        if (msgImageHashes.get(item.msg)?.has(h)) continue;
+        byHash.set(h, item.img);
+        pastedInjections.push({ msg: item.msg, path: item.path, hash: h });
+      }
+    }
+
+    if (byHash.size === 0) return;
     loader.bindTurnContext(ctx);
     if (!isAnyVisionModelResolvable(ctx.modelRegistry, config)) {
       notifyUnresolvedVisionModel(ctx, config.visionModel!);
@@ -783,6 +918,26 @@ export default function (pi: ExtensionAPI) {
         changed = true;
       }
     }
+
+    for (const item of pastedInjections) {
+      const desc = descs.get(item.hash) ?? UNAVAILABLE;
+      const rawContent = item.msg.content;
+      const blocks: Array<{ type: string; text?: string }> =
+        typeof rawContent === "string"
+          ? [{ type: "text", text: rawContent }]
+          : Array.isArray(rawContent)
+            ? (rawContent as Array<{ type: string; text?: string }>).slice()
+            : [];
+      const blockText = `${item.path}\n${desc}`;
+      const alreadyIncluded = blocks.some(
+        (b) => b.type === "text" && typeof b.text === "string" && b.text.includes(blockText),
+      );
+      if (alreadyIncluded) continue;
+      blocks.push({ type: "text", text: blockText });
+      item.msg.content = blocks;
+      changed = true;
+    }
+
     if (changed) return { messages: event.messages };
   });
 
@@ -843,8 +998,9 @@ export default function (pi: ExtensionAPI) {
     );
   });
 
-  pi.on("model_select", (event, ctx) => {
+  pi.on("model_select", async (event, ctx) => {
     currentModel = event.model;
+    await ensureRouterCapabilitiesForModel(ctx, event.model);
     persistFalseVisionOverride(ctx, event.model);
     if (!ctx.hasUI) return;
     if (!isConfigured(config)) return;
@@ -919,7 +1075,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
   }
 
   if (subcommand === "status") {
-    showStatus(ctx);
+    await showStatus(ctx);
     return;
   }
 
@@ -993,10 +1149,12 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
       return;
     }
     const ref = formatModelRef(parsed.provider, parsed.id);
+    await ensureRouterCapabilitiesForModel(ctx, model);
     updateConfig(ctx, (c) => ({ ...c, visionModel: ref }), `Vision model set to ${ref}.`);
-    if (!isVisionModel(model)) {
+    const cap = routerCache.get(model.provider, model.id);
+    if (!isEffectiveVisionModel(model, cap)) {
       ctx.ui.notify(
-        `Note: ${ref} does not declare image input — it may not describe images well.`,
+        `Note: ${ref} appears text-only — it may not describe images well.`,
         "warning",
       );
     }
@@ -1175,18 +1333,37 @@ function handleTimeoutSubcommand(ctx: ExtensionCommandContext, rest: string): vo
 /** Connected, vision-capable models — the same set the pickers show. Text-only
  *  models can't describe images, so they would only produce
  *  "[Image: description unavailable]" errors. getAvailable() excludes the whole
- *  catalogue of unauthenticated models. */
-function availableVisionModels(ctx: ExtensionCommandContext): Array<{
-  provider: string;
-  id: string;
-  name: string;
-  input?: ("text" | "image")[];
-  reasoning?: boolean;
-}> {
-  return ctx.modelRegistry
-    .getAvailable()
-    .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }))
-    .filter((m) => isVisionModel(m));
+ *  catalogue of unauthenticated models. Router `/models` metadata and
+ *  false-vision heuristics filter out text-only models behind proxies like
+ *  Magpie, 9router, and omnirouter. */
+async function availableVisionModels(ctx: ExtensionCommandContext): Promise<
+  Array<{
+    provider: string;
+    id: string;
+    name: string;
+    input?: ("text" | "image")[];
+    reasoning?: boolean;
+  }>
+> {
+  await routerCache.refreshProviders(ctx.modelRegistry);
+  const explicitTextOverrides = readExplicitTextOnlyOverrides();
+  const out: Array<{
+    provider: string;
+    id: string;
+    name: string;
+    input?: ("text" | "image")[];
+    reasoning?: boolean;
+  }> = [];
+
+  for (const m of ctx.modelRegistry.getAvailable()) {
+    const ref = formatModelRef(m.provider, m.id);
+    const cap = routerCache.get(m.provider, m.id);
+    const hasExplicitTextOverride = explicitTextOverrides.has(ref);
+    if (!isEffectiveVisionModel(m, cap, { hasExplicitTextOverride })) continue;
+    const input = isVisionModel(m) ? m.input : (["text", "image"] as ("text" | "image")[]);
+    out.push({ provider: m.provider, id: m.id, name: m.name, input, reasoning: m.reasoning });
+  }
+  return out;
 }
 
 async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
@@ -1195,7 +1372,7 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
     return;
   }
 
-  const availableModels = availableVisionModels(ctx);
+  const availableModels = await availableVisionModels(ctx);
 
   if (ctx.mode !== "tui") {
     const modelItems = ["None", ...availableModels.map((m) => `${m.provider}/${m.id}`)];
@@ -1279,7 +1456,8 @@ async function showSelector(ctx: ExtensionCommandContext): Promise<void> {
   }
 }
 
-function showStatus(ctx: ExtensionCommandContext): void {
+async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
+  await ensureRouterCapabilitiesForModel(ctx, ctx.model);
   const lines: string[] = [];
   lines.push(`Vision handoff: ${config.enabled ? "enabled" : "disabled"}`);
   lines.push(`Vision model: ${config.visionModel ?? "(none — pick one with /vision-watcher)"}`);

@@ -146,35 +146,54 @@ describe("router-aware vision detection and Turn-1 forwarding", () => {
       ui: { notify: vi.fn(), select: selectMock },
     };
 
-    const { handlers, commands } = setupExtension();
-    await handlers["session_start"]({ type: "session_start", reason: "startup" }, activeCtx);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "remote/inception/mercury-3", architecture: { input_modalities: ["text"] } },
+            { id: "remote/auto/glm-5.3", architecture: { input_modalities: ["text"] } },
+            { id: "remote/enclave/cyberouter/abliterated-large-v2", architecture: { input_modalities: ["text"] } },
+            { id: "remote/agy-cli/gemini-3.8-flash", architecture: { input_modalities: ["text", "image"] } },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
 
-    // 1. /vision-watcher picker only lists true vision models (gemini-3.8-flash),
-    // excluding mercury-3, glm-5.3, and abliterated-large-v2 (GLM-5.3 label).
-    await commands["vision-watcher"]("", activeCtx);
-    expect(selectMock).toHaveBeenCalledWith("Vision model", ["None", "magpie/remote/agy-cli/gemini-3.8-flash"]);
+    try {
+      const { handlers, commands } = setupExtension();
+      await handlers["session_start"]({ type: "session_start", reason: "startup" }, activeCtx);
 
-    // 2. User attaches an image while chatting with mercury-3 -> automatically
-    // described by gemini-3.8-flash and forwarded as text in context.
-    const messages = [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "What is in this screenshot?" },
-          { type: "image", data: "QUJD", mimeType: "image/png" },
-        ],
-      },
-    ];
-    const ctxResult = (await handlers["context"](
-      { type: "context", messages },
-      activeCtx,
-    )) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> } | undefined;
+      // 1. /vision-watcher picker only lists true vision models (gemini-3.8-flash),
+      // excluding mercury-3, glm-5.3, and abliterated-large-v2.
+      await commands["vision-watcher"]("", activeCtx);
+      expect(selectMock).toHaveBeenCalledWith("Vision model", ["None", "magpie/remote/agy-cli/gemini-3.8-flash"]);
 
-    expect(runBatch).toHaveBeenCalledTimes(1);
-    expect(ctxResult).toBeDefined();
-    const outBlocks = ctxResult!.messages[0]!.content;
-    expect(outBlocks.some((b) => b.type === "image")).toBe(false);
-    expect(outBlocks.some((b) => b.text?.includes("[Image: described-"))).toBe(true);
+      // 2. User attaches an image while chatting with mercury-3 -> automatically
+      // described by gemini-3.8-flash and forwarded as text in context.
+      const messages = [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is in this screenshot?" },
+            { type: "image", data: "QUJD", mimeType: "image/png" },
+          ],
+        },
+      ];
+      const ctxResult = (await handlers["context"](
+        { type: "context", messages },
+        activeCtx,
+      )) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> } | undefined;
+
+      expect(runBatch).toHaveBeenCalledTimes(1);
+      expect(ctxResult).toBeDefined();
+      const outBlocks = ctxResult!.messages[0]!.content;
+      expect(outBlocks.some((b) => b.type === "image")).toBe(false);
+      expect(outBlocks.some((b) => b.text?.includes("[Image: described-"))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("forwards pasted clipboard image paths on Turn 1 in context when asyncClipboardHandoff is false", async () => {

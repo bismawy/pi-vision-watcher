@@ -164,6 +164,7 @@ describe("router-aware vision detection and Turn-1 forwarding", () => {
     try {
       const { handlers, commands } = setupExtension();
       await handlers["session_start"]({ type: "session_start", reason: "startup" }, activeCtx);
+      await new Promise((r) => setTimeout(r, 10));
 
       // 1. /vision-watcher picker only lists true vision models (gemini-3.8-flash),
       // excluding mercury-3, glm-5.3, and abliterated-large-v2.

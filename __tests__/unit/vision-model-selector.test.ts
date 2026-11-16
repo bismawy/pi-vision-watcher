@@ -452,4 +452,45 @@ describe("VisionModelSelectorComponent", () => {
     // Hug, not a column: one space between the ref and the marker.
     expect(row("p/a")).toContain("</> <accent>✓ primary</>");
   });
+
+  it("excludes false-vision text-only router models even when input includes image", () => {
+    const mixed = [
+      { provider: "magpie", id: "remote/agy-cli/gemini-3.8-flash", name: "Gemini 3.8 Flash", input: ["text", "image"] as const },
+      { provider: "magpie", id: "remote/auto/glm-5.3", name: "GLM 5.3", input: ["text", "image"] as const },
+      { provider: "magpie", id: "remote/inception/mercury-3", name: "Mercury 3", input: ["text", "image"] as const },
+      { provider: "magpie", id: "remote/devin/swe-2-flash", name: "SWE-2 Flash", input: ["text", "image"] as const },
+      { provider: "magpie", id: "remote/agy-cli/gpt-oss-120b", name: "GPT-OSS 120B", input: ["text", "image"] as const },
+    ];
+    const component = new VisionModelSelectorComponent(
+      theme,
+      mixed as any,
+      null,
+      false,
+      "medium",
+      false,
+      vi.fn(),
+    );
+    const rendered = component.render(100).join("\n");
+    expect(rendered).toContain("magpie/remote/agy-cli/gemini-3.8-flash");
+    expect(rendered).not.toContain("glm-5.3");
+    expect(rendered).not.toContain("mercury-3");
+    expect(rendered).not.toContain("swe-2-flash");
+    expect(rendered).not.toContain("gpt-oss-120b");
+  });
+
+  it("enter selects the highlighted model when currentRef is null without requiring space first", () => {
+    const { component, done } = build({ currentRef: null });
+    component.handleInput(DOWN); // None -> p/a
+    component.handleInput(ENTER);
+    expect(done.mock.calls[0][0].ref).toBe("p/a");
+  });
+
+  it("enter on a filtered match keeps it selected instead of toggling an active primary off", () => {
+    const { component, done } = build({ currentRef: "p/a" });
+    component.handleInput("/");
+    component.handleInput("a");
+    component.handleInput(ENTER); // stop typing
+    component.handleInput(ENTER); // save
+    expect(done.mock.calls[0][0].ref).toBe("p/a");
+  });
 });

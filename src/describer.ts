@@ -46,6 +46,7 @@ import {
   DEFAULT_VISION_PROMPT,
   describeTimeoutMs,
   formatModelRef,
+  isSoftProviderErrorText,
   markDescriptionTruncated,
   parseBatchedDescriptions,
   type ExtractedImage,
@@ -470,6 +471,12 @@ async function callVision<T>(
       .trim();
     if (!text) {
       const reason = "vision model returned an empty description";
+      deps.setLastError(reason);
+      appendVisionError({ ...base, reason, config: configSnapshot(cfg) });
+      return null;
+    }
+    if (isSoftProviderErrorText(text)) {
+      const reason = `vision model returned an error message as text: ${text.slice(0, 200)}`;
       deps.setLastError(reason);
       appendVisionError({ ...base, reason, config: configSnapshot(cfg) });
       return null;

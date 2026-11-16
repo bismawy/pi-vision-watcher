@@ -29,7 +29,7 @@ import {
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { keyText } from "@earendil-works/pi-coding-agent";
-import { formatModelRef, isVisionModel, THINKING_LEVELS } from "./index.js";
+import { formatModelRef, isEffectiveVisionModel, THINKING_LEVELS } from "./index.js";
 
 /** Failover chain length cap — three is already far past the point where a
  *  fourth describer would ever be reached. */
@@ -204,6 +204,9 @@ export class VisionModelSelectorComponent implements Component {
   private typing = false;
   /** Transient hint (e.g. chain cap hit), rendered above the legend. */
   private notice: string | null = null;
+  /** Whether the user explicitly toggled primary with Space or edited the fallback chain. */
+  private touchedPrimary = false;
+  private editedChain = false;
 
   private _focused = false;
   get focused(): boolean {
@@ -413,15 +416,14 @@ export class VisionModelSelectorComponent implements Component {
       return;
     }
 
-    // Confirming saves the configuration. When a filter query is typed, Enter
-    // ALSO adopts the highlighted model as the primary describer — the search
-    // field has already consumed every `space`, so without this the highlighted
-    // model could never be picked while filtering and the stale primary would
-    // be saved silently.
+    // Confirming saves the configuration. Adopt the highlighted row when a filter
+    // query is active OR when no primary has been picked yet (and the user
+    // hasn't toggled it off with Space or edited fallbacks), so highlighting a
+    // model and pressing Enter works intuitively on first setup.
     if (kb.matches(data, "tui.select.confirm") || matchesKey(data, Key.ctrl("s"))) {
-      if (this.searchInput.getValue()) {
-        const item = this.filteredItems[this.selectedIndex];
-        if (item) this.selectPrimary(item.ref);
+      const item = this.filteredItems[this.selectedIndex];
+      if (item && (this.searchInput.getValue() || (this.currentRef === null && !this.touchedPrimary && !this.editedChain && item.ref !== null))) {
+        this.currentRef = item.ref;
       }
       this.save();
       return;
@@ -574,13 +576,13 @@ export class VisionModelSelectorComponent implements Component {
       provider: m.provider,
       modelId: m.id,
       modelName: m.name || m.id,
-      vision: isVisionModel(m),
+      vision: isEffectiveVisionModel(m),
       reasoning: !!m.reasoning,
     });
 
     // Only vision-capable models are listed — a text-only model can't describe
     // images, so it would only produce "[Image: description unavailable]" errors.
-    const visionModels = allModels.filter((m) => isVisionModel(m)).map(make);
+    const visionModels = allModels.filter((m) => isEffectiveVisionModel(m)).map(make);
     return [...items, ...visionModels];
   }
 
@@ -645,6 +647,7 @@ export class VisionModelSelectorComponent implements Component {
     this.allItems.splice(to, 0, item!);
     this.filteredItems = this.allItems;
     this.selectedIndex = to;
+    this.editedChain = true;
     this.updateList();
   }
 
@@ -652,6 +655,7 @@ export class VisionModelSelectorComponent implements Component {
     if (this.fallbacks.size === 0) return;
     this.fallbacks.clear();
     this.notice = null;
+    this.editedChain = true;
     this.updateList();
   }
 
@@ -659,6 +663,7 @@ export class VisionModelSelectorComponent implements Component {
    *  (the chain is tried in order, so the config array must be deterministic
    *  rather than Set-iteration order). */
   private toggleFallback(ref: string): void {
+    this.editedChain = true;
     if (this.fallbacks.has(ref)) {
       this.fallbacks.delete(ref);
       this.notice = null;
@@ -674,6 +679,7 @@ export class VisionModelSelectorComponent implements Component {
   /** Space toggles the primary describer; picking the current one again clears
    *  it (same as the None row), so one key both sets and unsets. */
   private selectPrimary(ref: string | null): void {
+    this.touchedPrimary = true;
     this.currentRef = this.currentRef === ref ? null : ref;
     this.notice = null;
     this.updateList();

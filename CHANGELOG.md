@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- Detect text-only models behind routing proxies (such as Magpie, 9router, and omnirouter) using router capabilities and expanded model-family heuristics, so `/vision-watcher` filters them out and `autoHandoff` routes images through the vision model on first send.
+- Skip vision handoff when the active chat model is vision-capable, and only warn about an inactive handoff when the active chat model is text-only without a configured `visionModel`.
+- Treat short HTTP 200 provider quota, billing, auth, and JSON error messages (`isSoftProviderErrorText`) as failures in `callVision` so `fallbackModels` failover triggers automatically.
+
 ## [1.4.0] - 2026-11-13
 
 ### Changed

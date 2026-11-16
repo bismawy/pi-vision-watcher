@@ -583,4 +583,36 @@ describe("error logging (src/error-log.ts)", () => {
     await describeSingle(img("AAA"), "", visionModel, modelRegistry, cfg, makeDeps(), ac.signal);
     expect(readLog()).toHaveLength(0);
   });
+
+  it("treats soft provider quota/error text with stopReason stop as a failure so fallback can run", async () => {
+    completeSimple.mockResolvedValueOnce(
+      fakeResponse({
+        text: "accounts that have not been recharged can only try 10 times",
+        stopReason: "stop",
+      }),
+    );
+    const a = img("AAA");
+    const ha = imageHash(a.mimeType, a.data);
+    const deps = makeDeps();
+    const out = await runBatch([{ img: a, hash: ha }], "", visionModel, modelRegistry, cfg, deps);
+    expect(out.size).toBe(0);
+    expect(deps.setLastError).toHaveBeenCalledWith(
+      expect.stringContaining("accounts that have not been recharged can only try 10 times"),
+    );
+    expect(readLog()).toHaveLength(1);
+  });
+
+  it("keeps legitimate batched image descriptions even when the screenshot itself shows an error", async () => {
+    completeSimple.mockResolvedValueOnce(
+      fakeResponse({
+        text: "<<<IMAGE 1>>>\nA browser window showing: accounts that have not been recharged can only try 10 times.\n<<<END>>>",
+        stopReason: "stop",
+      }),
+    );
+    const a = img("AAA");
+    const ha = imageHash(a.mimeType, a.data);
+    const out = await runBatch([{ img: a, hash: ha }], "", visionModel, modelRegistry, cfg, makeDeps());
+    expect(out.size).toBe(1);
+    expect(out.get(ha)).toContain("A browser window showing");
+  });
 });

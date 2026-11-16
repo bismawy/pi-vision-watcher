@@ -12,6 +12,7 @@ import {
   formatModelRef,
   getConfigPath,
   assistantErrorText,
+  isEffectiveVisionModel,
   isImageNotSupportedError,
   isKnownTextOnlyFalselyVision,
   setTextOnlyInputOverride,
@@ -544,7 +545,46 @@ describe("isKnownTextOnlyFalselyVision", () => {
     expect(isKnownTextOnlyFalselyVision("glm-4v")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("glm-4.5v")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("glm-4.5v-flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("kimi-k3")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("qwen3.8-27b")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("minimax-m3")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("Clef")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("llama-3.2-11b-vision")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("")).toBe(false);
+  });
+
+  it("matches additional text-only router models and aliased labels", () => {
+    expect(isKnownTextOnlyFalselyVision("remote/inception/mercury-3")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("remote/devin/swe-2-flash")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("remote/agy-cli/gpt-oss-120b")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("qwen3-coder-480b")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("llama-3.3-70b-instruct")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("codestral-latest")).toBe(true);
+    expect(
+      isKnownTextOnlyFalselyVision(
+        "remote/enclave/cyberouter/abliterated-large-v2",
+        "Abliterated Large v2 (GLM-5.3, uncensored)",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("isEffectiveVisionModel", () => {
+  it("uses router metadata over false-vision models.json input declarations", () => {
+    const model = { id: "custom-model", name: "Custom", input: ["text", "image"] as ("text" | "image")[] };
+    expect(isEffectiveVisionModel(model, { vision: false })).toBe(false);
+    expect(isEffectiveVisionModel(model, { vision: true })).toBe(true);
+  });
+
+  it("upgrades omitted input when router confirms vision unless explicitly overridden to text", () => {
+    const model = { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", input: ["text"] as ("text" | "image")[] };
+    expect(isEffectiveVisionModel(model, { vision: true })).toBe(true);
+    expect(isEffectiveVisionModel(model, { vision: true }, { hasExplicitTextOverride: true })).toBe(false);
+  });
+
+  it("rejects known text-only families even when both models.json and router claim vision", () => {
+    const model = { id: "remote/auto/glm-5.3", name: "GLM 5.3", input: ["text", "image"] as ("text" | "image")[] };
+    expect(isEffectiveVisionModel(model, { vision: true })).toBe(false);
   });
 });
 

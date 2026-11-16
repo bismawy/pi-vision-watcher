@@ -265,18 +265,65 @@ export function isImageNotSupportedError(text: string): boolean {
   );
 }
 
+/** Detect upstream provider/proxy errors returned as normal HTTP 200 text
+ *  (`stopReason: "stop"`) — e.g. aihubmix quota exhaustion ("accounts that have
+ *  not been recharged can only try 10 times"), raw JSON error bodies, or short
+ *  billing/auth/rate-limit rejections. Rejecting these in `callVision` lets the
+ *  dataloader's retry + `fallbackModels` chain take over.
+ *
+ *  Guarded to short responses (`<= 500` chars) without batch delimiters so a
+ *  real screenshot description that quotes an error message is not rejected. */
+export function isSoftProviderErrorText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 500) return false;
+  if (/<<<IMAGE\s+\d+>>>/i.test(trimmed)) return false;
+  if (isImageNotSupportedError(trimmed)) return true;
+  if (/^\s*\{\s*"(?:error|code)"\s*:/i.test(trimmed)) return true;
+  if (
+    /accounts that have not been recharged can only try|insufficient[_ ]quota|exceeded your current quota|credit balance is too low|balance is insufficient|please recharge|top up your account/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  return /^(?:error|401|402|403|429|500|502|503)\s*[:\-]\s*(?:unauthorized|forbidden|rate limit|too many requests|insufficient|invalid api key|bad gateway|service unavailable)/i.test(
+    trimmed,
+  );
+}
+
 /** Models whose registry entries commonly declare image input while the
- *  backend rejects images (DeepSeek V4, GLM 4/5 non-V via aggregator
- *  proxies). Conservative: VL / Vision / Janus / *V variants keep image
- *  input. Used so autoHandoff covers them on the FIRST send — waiting for a
- *  400 is too late. */
-export function isKnownTextOnlyFalselyVision(id: string | undefined | null): boolean {
-  if (!id) return false;
-  const n = id.toLowerCase();
-  if (n.includes("vl") || n.includes("vision") || n.includes("janus")) return false;
-  if (/\dv(?=[-_./\s]|$)/.test(n)) return false; // glm-4v, glm-4.5v — vision variants
-  if (/deepseek[-_./]*v4/.test(n)) return true;
-  if (/glm[-_./]*[45]/.test(n)) return true;
+ *  backend rejects images (DeepSeek V3/V4/R1, GLM 4/5 non-V, Mercury, SWE,
+ *  GPT-OSS, Qwen Coder, Llama 3.1/3.3, Codestral/Devstral/Magistral).
+ *  Conservative: VL / Vision / Janus / OCR / Omni / *V variants keep image
+ *  input unless explicitly tagged text-only. Used for both `/vision-watcher`
+ *  filtering and `autoHandoff` so text-only models hand off on FIRST send. */
+export function isKnownTextOnlyFalselyVision(
+  id: string | undefined | null,
+  label?: string | null,
+): boolean {
+  const combined = [id, label]
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .join(" ");
+  if (!combined) return false;
+  const n = combined.toLowerCase();
+  if (/\btext[-_\s]?only\b/.test(n)) return true;
+  if (
+    n.includes("vl") ||
+    n.includes("vision") ||
+    n.includes("janus") ||
+    /\b(?:ocr|pixtral|llava|internvl|minicpm-v|cogvlm|molmo|qvq|omni)\b/.test(n)
+  ) {
+    return false;
+  }
+  if (/\dv(?=[-_./\s:]|$)/.test(n)) return false; // glm-4v, glm-4.5v — vision variants
+  if (/deepseek[-_./\s]*(?:v[34]|r1|chat|coder|reasoner)/.test(n)) return true;
+  if (/glm[-_./\s]*[45]/.test(n)) return true;
+  if (/\bmercury[-_./\s]*(?:2|3|coder|decide|small|mini)\b/.test(n)) return true;
+  if (/\bswe[-_./\s]*[12]\b/.test(n)) return true;
+  if (/\bgpt[-_./\s]*oss\b/.test(n)) return true;
+  if (/\bqwen[-_./\s]*(?:2(?:\.5)?|3(?:\.\d+)?)[-_./\s]*coder\b/.test(n)) return true;
+  if (/\bllama[-_./\s]*3(?:\.[13])?(?=[-_./\s:]|$)/.test(n)) return true;
+  if (/\b(?:codestral|devstral|magistral)\b/.test(n)) return true;
   return false;
 }
 
@@ -338,6 +385,25 @@ export function setTextOnlyInputOverride(
 /** Whether a model declares image input. */
 export function isVisionModel(model: { input?: ("text" | "image")[] } | undefined | null): boolean {
   return !!model && Array.isArray(model.input) && model.input.includes("image");
+}
+
+/** Determine effective vision capability by combining Pi's registry `input`,
+ *  optional live router `/models` metadata, explicit user `modelOverrides`, and
+ *  false-vision model heuristics. */
+export function isEffectiveVisionModel(
+  model: { id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
+  routerCap?: { vision?: boolean; label?: string },
+  options?: { hasExplicitTextOverride?: boolean },
+): boolean {
+  if (!model) return false;
+  if (options?.hasExplicitTextOverride) return false;
+  const label = [model.name, routerCap?.label]
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .join(" ");
+  if (routerCap?.vision === false) return false;
+  if (isKnownTextOnlyFalselyVision(model.id, label)) return false;
+  if (routerCap?.vision === true) return true;
+  return isVisionModel(model);
 }
 
 /** Merge a parsed config object onto defaults, tolerating missing/invalid fields. */

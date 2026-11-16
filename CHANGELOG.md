@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.1] - 2026-11-16
 
 ### Fixed
 - Detect text-only models behind routing proxies (such as Magpie, 9router, and omnirouter) using router capabilities and expanded model-family heuristics, so `/vision-watcher` filters them out and `autoHandoff` routes images through the vision model on first send.

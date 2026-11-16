@@ -192,12 +192,12 @@ export class RouterCapabilityCache {
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly ttlMs: number;
   private readonly timeoutMs: number;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl?: typeof fetch;
 
   constructor(options?: { ttlMs?: number; timeoutMs?: number; fetchImpl?: typeof fetch }) {
     this.ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.fetchImpl = options?.fetchImpl ?? fetch;
+    this.fetchImpl = options?.fetchImpl;
   }
 
   clear(): void {
@@ -253,7 +253,7 @@ export class RouterCapabilityCache {
       const task = (async () => {
         try {
           const headers = await resolveRequestHeaders(modelRegistry, sampleModel);
-          const models = await fetchRouterCapabilities(baseUrl, headers, this.timeoutMs, this.fetchImpl);
+          const models = await fetchRouterCapabilities(baseUrl, headers, this.timeoutMs, this.fetchImpl ?? globalThis.fetch);
           this.entries.set(provider, { baseUrl, fetchedAt: Date.now(), models });
         } finally {
           this.inflight.delete(provider);

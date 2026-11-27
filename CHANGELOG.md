@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.0] - 2026-11-27
 
 ### Added
 - Probe unknown and proxy-routed models lazily on first image with a tiny 2-band color PNG (`src/probe.ts`) and cache confirmed results on disk (`~/.pi/agent/cache/pi-vision-watcher/capabilities.json`, 14-day TTL). The probe detects both HTTP 400 rejections and silent image-stripping proxies across providers without hardcoded model lists.

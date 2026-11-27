@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -314,5 +314,99 @@ describe("router-aware vision detection and Turn-1 forwarding", () => {
     )) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> } | undefined;
     expect(runBatch).toHaveBeenCalledTimes(1);
     expect(handoffRes?.messages[0]?.content.some((b) => b.text?.includes("[Image: described-"))).toBe(true);
+  });
+
+  it("does NOT proactively mutate models.json on session_start/model_select, resets cache on /vision-watcher model, and reports capability source in status", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "remote/devin/swe-2-1", modalities: { input: ["text", "image"] } },
+          { id: "remote/inception/mercury-3", modalities: { input: ["text"] } },
+          { id: "remote/agy-cli/gemini-3.8-flash", modalities: { input: ["text", "image"] } },
+        ],
+      }),
+    })) as any;
+
+    const modelsJsonPath = join(tmpHome, "models.json");
+    const originalModelsJson = JSON.stringify({ providers: { magpie: { modelOverrides: {} } } }, null, 2);
+    writeFileSync(modelsJsonPath, originalModelsJson, "utf8");
+
+    const swe21 = {
+      provider: "magpie",
+      id: "remote/devin/swe-2-1",
+      name: "SWE-2.1 · Devin",
+      baseUrl: "http://127.0.0.1:3425/v1",
+      input: ["text", "image"] as ("text" | "image")[],
+    };
+    const mercury = {
+      provider: "magpie",
+      id: "remote/inception/mercury-3",
+      name: "Mercury 3",
+      baseUrl: "http://127.0.0.1:3425/v1",
+      input: ["text", "image"] as ("text" | "image")[],
+    };
+    const describer = {
+      provider: "magpie",
+      id: "remote/agy-cli/gemini-3.8-flash",
+      name: "Gemini 3.8 Flash",
+      baseUrl: "http://127.0.0.1:3425/v1",
+      input: ["text", "image"] as ("text" | "image")[],
+    };
+
+    const registry = {
+      getAvailable: () => [swe21, mercury, describer],
+      find: (p: string, id: string) => [swe21, mercury, describer].find((m) => m.provider === p && m.id === id),
+      getProvider: () => ({ baseUrl: "http://127.0.0.1:3425/v1" }),
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k", headers: {} }),
+    };
+
+    const notify = vi.fn();
+    const { handlers, commands } = setupExtension();
+    const ctx = {
+      mode: "print" as const,
+      hasUI: true,
+      model: mercury,
+      modelRegistry: registry,
+      signal: new AbortController().signal,
+      ui: { notify },
+    };
+
+    await handlers["session_start"]({ type: "session_start", reason: "startup" }, ctx);
+    await handlers["model_select"]({ type: "model_select", model: swe21 }, { ...ctx, model: swe21 });
+
+    // models.json must NOT be mutated by proactive heuristics
+    expect(readFileSync(modelsJsonPath, "utf8")).toBe(originalModelsJson);
+
+    // Status reports capability detection source
+    await commands["vision-watcher"]("status", { ...ctx, model: mercury });
+    const statusMsg = notify.mock.calls.map((c) => String(c[0])).find((s) => s.includes("Capability detection:")) ?? "";
+    expect(statusMsg).toContain("text-only (source: router-text-only)");
+
+    // Probe subcommand respects router-text-only and clear resets disk cache
+    await commands["vision-watcher"]("probe", { ...ctx, model: mercury });
+    expect(notify.mock.calls.some((c) => String(c[0]).includes("router-text-only"))).toBe(true);
+    await commands["vision-watcher"]("probe clear", ctx);
+    expect(existsSync(join(tmpHome, "cache", "pi-vision-watcher", "capabilities.json"))).toBe(true);
+
+    // Switching/re-setting vision model via /vision-watcher model invalidates description cache
+    const makeImgMsg = () => [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Read this" },
+          { type: "image", data: "UkVTRVRfVEVTVA==", mimeType: "image/png" },
+        ],
+      },
+    ];
+    await handlers["context"]({ type: "context", messages: makeImgMsg() }, { ...ctx, model: mercury });
+    expect(runBatch).toHaveBeenCalledTimes(1);
+    // Cache hit before config update
+    await handlers["context"]({ type: "context", messages: makeImgMsg() }, { ...ctx, model: mercury });
+    expect(runBatch).toHaveBeenCalledTimes(1);
+    // Re-setting vision model clears cache so next turn re-describes
+    await commands["vision-watcher"]("model magpie/remote/agy-cli/gemini-3.8-flash", { ...ctx, model: mercury });
+    await handlers["context"]({ type: "context", messages: makeImgMsg() }, { ...ctx, model: mercury });
+    expect(runBatch).toHaveBeenCalledTimes(2);
   });
 });

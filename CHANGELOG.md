@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Probe unknown and proxy-routed models lazily on first image with a tiny 2-band color PNG (`src/probe.ts`) and cache confirmed results on disk (`~/.pi/agent/cache/pi-vision-watcher/capabilities.json`, 14-day TTL). The probe detects both HTTP 400 rejections and silent image-stripping proxies across providers without hardcoded model lists.
+- Add `/vision-watcher probe [provider/id|clear]` to re-test model vision capability on demand or clear the capability cache, and display the capability detection source in `/vision-watcher status`.
+
+### Fixed
+- Stop writing `modelOverrides.<id>.input = ["text"]` into `models.json` proactively from model-name heuristics on `session_start` and `model_select`. Write to `models.json` only after a real runtime image-unsupported error.
+- Keep `routerCap.vision === false` ahead of runtime probes (so proxy-side vision bridges do not mask text-only models), let confirmed probe results override name heuristics, and narrow the fallback SWE regex so multimodal `SWE-2.1` (`swe-2-1`, `swe-2.1`) is no longer treated as text-only.
+- Clear the in-memory description cache and warning deduplication set in `updateConfig()` so retries after changing `/vision-watcher` settings re-describe images with the new configuration.
+
 ## [1.4.1] - 2026-11-16
 
 ### Fixed

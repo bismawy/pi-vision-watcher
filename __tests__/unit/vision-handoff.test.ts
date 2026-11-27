@@ -15,6 +15,7 @@ import {
   isEffectiveVisionModel,
   isImageNotSupportedError,
   isKnownTextOnlyFalselyVision,
+  resolveModelVisionCapability,
   setTextOnlyInputOverride,
   isVisionModel,
   markDescriptionTruncated,
@@ -556,6 +557,9 @@ describe("isKnownTextOnlyFalselyVision", () => {
   it("matches additional text-only router models and aliased labels", () => {
     expect(isKnownTextOnlyFalselyVision("remote/inception/mercury-3")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("remote/devin/swe-2-flash")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("devin/swe-1")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("devin/swe-1.5")).toBe(true);
+    expect(isKnownTextOnlyFalselyVision("devin/swe-2")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("remote/agy-cli/gpt-oss-120b")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("qwen3-coder-480b")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("llama-3.3-70b-instruct")).toBe(true);
@@ -566,6 +570,13 @@ describe("isKnownTextOnlyFalselyVision", () => {
         "Abliterated Large v2 (GLM-5.3, uncensored)",
       ),
     ).toBe(true);
+  });
+
+  it("does not match multimodal SWE-2.1 variants", () => {
+    expect(isKnownTextOnlyFalselyVision("remote/devin/swe-2-1")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("auto/swe-2-1", "SWE-2.1 · Devin · routing group")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("devin/swe-2.1")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("devin/swe-2.1-flash")).toBe(false);
   });
 });
 
@@ -582,9 +593,32 @@ describe("isEffectiveVisionModel", () => {
     expect(isEffectiveVisionModel(model, { vision: true }, { hasExplicitTextOverride: true })).toBe(false);
   });
 
-  it("rejects known text-only families even when both models.json and router claim vision", () => {
+  it("rejects known text-only families even when both models.json and router claim vision (when unprobed)", () => {
     const model = { id: "remote/auto/glm-5.3", name: "GLM 5.3", input: ["text", "image"] as ("text" | "image")[] };
     expect(isEffectiveVisionModel(model, { vision: true })).toBe(false);
+  });
+
+  it("lets confirmed runtime probe results override name heuristics and unverified metadata, while router text-only still wins over probe", () => {
+    const glmFlash = { id: "remote/devin/glm-5-3-flash", name: "GLM-5.3 Flash", input: ["text", "image"] as ("text" | "image")[] };
+    // Unprobed -> heuristic fallback
+    expect(resolveModelVisionCapability(glmFlash, { vision: true })).toEqual({ vision: false, source: "heuristic" });
+    // Confirmed runtime probe overrides heuristic
+    expect(
+      resolveModelVisionCapability(glmFlash, { vision: true }, { probeCap: { vision: true, source: "probe", detail: "verified green/blue" } }),
+    ).toEqual({ vision: true, source: "probe", detail: "verified green/blue" });
+    // Confirmed negative probe overrides lying router + models.json
+    const unknownModel = { id: "custom/mystery-v9", name: "Mystery v9", input: ["text", "image"] as ("text" | "image")[] };
+    expect(
+      resolveModelVisionCapability(unknownModel, { vision: true }, { probeCap: { vision: false, source: "probe" } }),
+    ).toEqual({ vision: false, source: "probe", detail: undefined });
+    // Router explicit text-only MUST beat probe (guards against proxy-side vision bridges)
+    expect(
+      resolveModelVisionCapability(unknownModel, { vision: false }, { probeCap: { vision: true, source: "probe" } }),
+    ).toEqual({ vision: false, source: "router-text-only" });
+    // Explicit models.json override beats everything
+    expect(
+      resolveModelVisionCapability(unknownModel, { vision: true }, { hasExplicitTextOverride: true, probeCap: { vision: true, source: "probe" } }),
+    ).toEqual({ vision: false, source: "models-override" });
   });
 });
 

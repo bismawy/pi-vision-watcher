@@ -44,11 +44,11 @@ import {
   isThinkingLevel,
   assistantErrorText,
   isImageNotSupportedError,
-  isKnownTextOnlyFalselyVision,
   isVisionModel,
   NON_VISION_IMAGE_NOTE,
   parseModelRef,
   readConfig,
+  resolveModelVisionCapability,
   setTextOnlyInputOverride,
   stripNonVisionImageNote,
   writeConfig,
@@ -56,7 +56,8 @@ import {
   type ExtractedImage,
   type VisionHandoffConfig,
 } from "./src/index.js";
-import { RouterCapabilityCache } from "./src/router.js";
+import { isDirectVendorBaseUrl, RouterCapabilityCache } from "./src/router.js";
+import { getProbeCachePath, VisionProbeCache, type ProbeCacheEntry } from "./src/probe.js";
 import {
   USAGE_ENTRY_TYPE,
   USAGE_EVENT_CHANNEL,
@@ -102,6 +103,7 @@ let editorInstalled = false;
 let visionModelCache: { ref: string; model: Model<Api> } | null = null;
 let visionModelUnresolvedRef: string | null = null;
 const routerCache = new RouterCapabilityCache();
+const probeCache = new VisionProbeCache();
 const pastedPathImages = new Map<string, Promise<ExtractedImage | null>>();
 
 function preparePastedPathImage(path: string): Promise<ExtractedImage | null> {
@@ -155,12 +157,57 @@ function readExplicitTextOnlyOverrides(): Set<string> {
   return out;
 }
 
+function getModelBaseUrl(
+  model: { provider?: string; baseUrl?: string } | undefined | null,
+  modelRegistry?: Partial<ModelRegistry> | null,
+): string | undefined {
+  if (!model) return undefined;
+  return model.baseUrl || (model.provider ? modelRegistry?.getProvider?.(model.provider)?.baseUrl : undefined);
+}
+
+function getProbeCap(
+  model: { provider?: string; id?: string; baseUrl?: string } | undefined | null,
+  modelRegistry?: Partial<ModelRegistry> | null,
+): ProbeCacheEntry | undefined {
+  if (!model?.provider || !model.id) return undefined;
+  return probeCache.get(model.provider, model.id, getModelBaseUrl(model, modelRegistry));
+}
+
 async function ensureRouterCapabilitiesForModel(
   ctx: { modelRegistry?: Partial<ModelRegistry> },
   model: { provider?: string } | undefined | null,
 ): Promise<void> {
   if (!model?.provider || routerCache.hasFresh(model.provider)) return;
   await routerCache.refreshProviders(ctx.modelRegistry, { providers: [model.provider] });
+}
+
+/** Ensure both router `/models` metadata and (when `allowProbe` is set and an
+ *  image is actually about to be processed) a cached runtime vision probe exist
+ *  for `model`. Probing runs at most once per `provider/id + baseUrl` (persisted
+ *  on disk), and is skipped for direct vendor APIs, explicit text overrides,
+ *  and models already declared text-only by router `/models`. */
+async function ensureVisionCapabilityForModel(
+  ctx: { modelRegistry?: Partial<ModelRegistry>; signal?: AbortSignal },
+  model: Model<Api> | undefined | null,
+  options?: { allowProbe?: boolean },
+): Promise<void> {
+  await ensureRouterCapabilitiesForModel(ctx, model);
+  if (!options?.allowProbe || !model?.provider || !model?.id || !model?.api) return;
+  const ref = formatModelRef(model.provider, model.id);
+  if (config.handoffModels.includes(ref)) return;
+  if (readExplicitTextOnlyOverrides().has(ref)) return;
+  const routerCap = routerCache.get(model.provider, model.id);
+  // Trust explicit router text-only declarations without probing: proxies such
+  // as Magpie can run a server-side vision bridge that would make a text-only
+  // model appear vision-capable to a probe.
+  if (routerCap?.vision === false) return;
+  // When Pi's own registry marks the model text-only and the router did not
+  // upgrade it, Pi strips image blocks client-side anyway — handoff must run.
+  if (!isVisionModel(model) && routerCap?.vision !== true) return;
+  const baseUrl = getModelBaseUrl(model, ctx.modelRegistry);
+  if (isDirectVendorBaseUrl(baseUrl)) return;
+  if (probeCache.get(model.provider, model.id, baseUrl)) return;
+  await probeCache.probe(model, ctx.modelRegistry, { signal: ctx.signal });
 }
 
 interface PendingAsyncClipboardHandoff {
@@ -277,12 +324,13 @@ function resolveVisionModel(modelRegistry: ModelRegistry, ref: string): Model<Ap
   if (!parsed) return null;
   const model = modelRegistry.find(parsed.provider, parsed.id);
   if (!model) return null;
-  // If router /models metadata confirmed this model supports image input while
-  // models.json omitted `input`, expose `"image"` on the describer clone so
-  // pi-ai adapters don't downgrade or strip image blocks.
+  // If router /models metadata or a runtime probe confirmed this model supports
+  // image input while models.json omitted `input`, expose `"image"` on the
+  // describer clone so pi-ai adapters don't downgrade or strip image blocks.
   const cap = routerCache.get(model.provider, model.id);
+  const probeCap = getProbeCap(model, modelRegistry);
   const resolved =
-    !isVisionModel(model) && isEffectiveVisionModel(model, cap)
+    !isVisionModel(model) && isEffectiveVisionModel(model, cap, { probeCap })
       ? ({ ...model, input: ["text", "image"] } as Model<Api>)
       : model;
   visionModelCache = { ref, model: resolved };
@@ -317,8 +365,9 @@ function isConfigured(cfg: VisionHandoffConfig): boolean {
 }
 
 function isHandoffTarget(
-  model: { provider?: string; id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
+  model: { provider?: string; id?: string; name?: string; baseUrl?: string; input?: ("text" | "image")[] } | undefined | null,
   cfg: VisionHandoffConfig,
+  modelRegistry?: Partial<ModelRegistry> | null,
 ): boolean {
   if (!model || !model.provider || !model.id) return false;
   const ref = formatModelRef(model.provider, model.id);
@@ -327,11 +376,12 @@ function isHandoffTarget(
   // Pi itself strips image blocks when model.input omits "image", so handoff
   // must always run whenever the registry entry is non-vision.
   if (!isVisionModel(model)) return true;
-  // Aggregators/routers (Magpie, 9router, omnirouter) often mark text-only
-  // models as ["text", "image"] in models.json. Check router /models metadata
-  // and false-vision heuristics so FIRST send hands off.
+  // Aggregators/routers (Magpie, 9router, omnirouter) often mislabel models as
+  // ["text", "image"] in models.json. Combine router /models metadata, cached
+  // runtime vision probe results, and fallback heuristics.
   const cap = routerCache.get(model.provider, model.id);
-  return !isEffectiveVisionModel(model, cap);
+  const probeCap = getProbeCap(model, modelRegistry);
+  return !isEffectiveVisionModel(model, cap, { probeCap });
 }
 
 /** Whether paste-time prewarm should fire for a text change right now: the
@@ -419,23 +469,6 @@ function fixModelInputTextOnly(ctx: ExtensionContext, providerId: string, modelI
     ?.refresh?.({ allowNetwork: false })
     ?.catch?.(() => {});
   return true;
-}
-
-/** Persist `input: ["text"]` for a model that falsely declares image input.
- *  No-op if the model is already text-only or isn't detected as text-only. */
-function persistFalseVisionOverride(
-  ctx: ExtensionContext,
-  model: { provider?: string; id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
-): boolean {
-  if (!model?.provider || !model.id) return false;
-  if (!isVisionModel(model)) return false;
-  const cap = routerCache.get(model.provider, model.id);
-  const label = [model.name, cap?.label]
-    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-    .join(" ");
-  const isFalseVision = cap?.vision === false || isKnownTextOnlyFalselyVision(model.id, label);
-  if (!isFalseVision) return false;
-  return fixModelInputTextOnly(ctx, model.provider, model.id);
 }
 
 function notifyUnresolvedVisionModel(ctx: ExtensionContext, ref: string): void {
@@ -542,27 +575,24 @@ export default function (pi: ExtensionAPI) {
     visionModelCache = null;
     visionModelUnresolvedRef = null;
     routerCache.clear();
+    probeCache.resetMemory();
     pastedPathImages.clear();
     warnedHashes.clear();
     loader.reset();
     currentModel = ctx.model;
-    persistFalseVisionOverride(ctx, ctx.model);
     installPrewarmEditor(ctx);
     // Warm router /models metadata in the background so /vision-watcher and
-    // active false-vision detection stay accurate without slowing startup.
-    void routerCache
-      .refreshProviders(ctx.modelRegistry)
-      .then(() => {
-        persistFalseVisionOverride(ctx, currentModel);
-      })
-      .catch(() => {});
+    // active capability detection stay accurate without slowing startup.
+    void routerCache.refreshProviders(ctx.modelRegistry).catch(() => {});
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     cancelAsyncClipboardHandoff();
     if (!isConfigured(config)) return;
-    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
-    if (!isHandoffTarget(ctx.model, config)) return;
+    const clipboardPaths = findPastedImagePaths(event.prompt || "");
+    const hasTurnImages = (event.images?.length ?? 0) > 0 || clipboardPaths.length > 0;
+    await ensureVisionCapabilityForModel(ctx, ctx.model, { allowProbe: hasTurnImages });
+    if (!isHandoffTarget(ctx.model, config, ctx.modelRegistry)) return;
 
     // Fresh turn → fresh turn-abort controller. `before_agent_start` fires
     // BEFORE the agent run starts, so `ctx.signal` is undefined here (the run's
@@ -625,7 +655,6 @@ export default function (pi: ExtensionAPI) {
     // describes an image the agent will see). A file that can't be read, isn't
     // a supported image, or fails to resize is skipped (the agent's `read`
     // will still describe it via `tool_result` if it emits an image block).
-    const clipboardPaths = findPastedImagePaths(event.prompt || "");
     const preparedClipboardImages = clipboardPaths.map(
       async (path): Promise<PreparedClipboardImage | null> => {
         try {
@@ -691,10 +720,9 @@ export default function (pi: ExtensionAPI) {
     const content = event.content;
     if (!Array.isArray(content)) return;
 
-    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
-    // Collect image blocks in this read result. (The read tool emits image
-    // blocks even for non-vision models — they reach here untouched.)
-    if (!isHandoffTarget(ctx.model, config)) return;
+    // Collect image blocks in this read result before touching router/probe so
+    // non-image file reads return in 0ms. (The read tool emits image blocks
+    // even for non-vision models — they reach here untouched.)
     const imgs: ExtractedImage[] = [];
     let hasImageBlock = false;
     for (const block of content) {
@@ -739,6 +767,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (imgs.length === 0) return;
+    await ensureVisionCapabilityForModel(ctx, ctx.model, { allowProbe: true });
+    if (!isHandoffTarget(ctx.model, config, ctx.modelRegistry)) return;
     loader.bindTurnContext(ctx);
     if (!isAnyVisionModelResolvable(ctx.modelRegistry, config)) {
       notifyUnresolvedVisionModel(ctx, config.visionModel!);
@@ -857,8 +887,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (byHash.size === 0 && userPastedPaths.length === 0) return;
-    await ensureRouterCapabilitiesForModel(ctx, ctx.model);
-    if (!isHandoffTarget(ctx.model, config)) return;
+    await ensureVisionCapabilityForModel(ctx, ctx.model, { allowProbe: true });
+    if (!isHandoffTarget(ctx.model, config, ctx.modelRegistry)) return;
 
     const pastedInjections: Array<{ msg: Record<string, unknown>; path: string; hash: string }> = [];
     if (userPastedPaths.length > 0) {
@@ -967,13 +997,24 @@ export default function (pi: ExtensionAPI) {
     // handler a no-op, so the 400 never taught us anything.
     if (msg?.role !== "assistant" && msg?.type !== "assistant") return;
     if (msg.stopReason !== "error") return;
-    if (!isImageNotSupportedError(assistantErrorText(msg))) return;
+    const errText = assistantErrorText(msg);
+    if (!isImageNotSupportedError(errText)) return;
     if (!isConfigured(config)) return;
     const model = ctx.model;
     if (!model?.provider || !model.id) return;
     const ref = formatModelRef(model.provider, model.id);
 
-    const fixed = persistFalseVisionOverride(ctx, model) || fixModelInputTextOnly(ctx, model.provider, model.id);
+    // Record runtime-confirmed rejection in our own capability cache first,
+    // then update models.json only on this confirmed rejection (never from
+    // speculative name heuristics).
+    probeCache.record(model.provider, model.id, {
+      vision: false,
+      source: "runtime-error",
+      baseUrl: getModelBaseUrl(model, ctx.modelRegistry),
+      detail: errText.slice(0, 140),
+    });
+
+    const fixed = fixModelInputTextOnly(ctx, model.provider, model.id);
     if (fixed) {
       if (!config.handoffModels.includes(ref)) {
         config = { ...config, handoffModels: [...config.handoffModels, ref] };
@@ -1001,12 +1042,11 @@ export default function (pi: ExtensionAPI) {
   pi.on("model_select", async (event, ctx) => {
     currentModel = event.model;
     await ensureRouterCapabilitiesForModel(ctx, event.model);
-    persistFalseVisionOverride(ctx, event.model);
     if (!ctx.hasUI) return;
     if (!isConfigured(config)) return;
     const model = event.model;
     if (!model) return;
-    if (isHandoffTarget(model, config)) {
+    if (isHandoffTarget(model, config, ctx.modelRegistry)) {
       ctx.ui.notify(
         `pi-vision-watcher: active — images will be described by ${config.visionModel}`,
         "info",
@@ -1017,7 +1057,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("vision-watcher", {
     description: HANDOFF_COMMAND_DESCRIPTION,
     getArgumentCompletions(prefix: string) {
-      const subcommands = ["select", "model", "status", "enable", "disable", "auto", "thinking", "prewarm", "async", "fallback", "timeout", "add", "remove", "clear", "help"];
+      const subcommands = ["select", "model", "status", "probe", "enable", "disable", "auto", "thinking", "prewarm", "async", "fallback", "timeout", "add", "remove", "clear", "help"];
       const matches = subcommands.filter((s) => s.startsWith(prefix));
       return matches.length > 0 ? matches.map((s) => ({ value: s, label: s })) : null;
     },
@@ -1046,6 +1086,8 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
         "  /vision-watcher select         Same as /vision-watcher",
         "  /vision-watcher model <p/id>   Set the vision model directly",
         "  /vision-watcher status         Show current config and active state",
+        "  /vision-watcher probe [p/id|clear]",
+        "                               Test whether a model sees images (2-band PNG probe) or clear probe cache",
         "  /vision-watcher enable         Enable vision handoff",
         "  /vision-watcher disable        Disable vision handoff (keeps configured model)",
         "  /vision-watcher auto <on|off>  Toggle automatic handoff for all non-vision models",
@@ -1076,6 +1118,11 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
 
   if (subcommand === "status") {
     await showStatus(ctx);
+    return;
+  }
+
+  if (subcommand === "probe") {
+    await handleProbeSubcommand(ctx, rest);
     return;
   }
 
@@ -1152,7 +1199,8 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
     await ensureRouterCapabilitiesForModel(ctx, model);
     updateConfig(ctx, (c) => ({ ...c, visionModel: ref }), `Vision model set to ${ref}.`);
     const cap = routerCache.get(model.provider, model.id);
-    if (!isEffectiveVisionModel(model, cap)) {
+    const probeCap = getProbeCap(model, ctx.modelRegistry);
+    if (!isEffectiveVisionModel(model, cap, { probeCap })) {
       ctx.ui.notify(
         `Note: ${ref} appears text-only — it may not describe images well.`,
         "warning",
@@ -1217,7 +1265,76 @@ function updateConfig(
   config = next;
   visionModelCache = null;
   visionModelUnresolvedRef = null;
+  // Drop cached descriptions and warning dedups so retrying after changing
+  // the vision model or its settings actually re-describes images.
+  loader.clearCache();
+  loader.reset();
+  warnedHashes.clear();
   ctx.ui.notify(`${message} (config: ${path})`, "info");
+}
+
+async function handleProbeSubcommand(ctx: ExtensionCommandContext, rest: string): Promise<void> {
+  const arg = rest.trim();
+  if (arg.toLowerCase() === "clear") {
+    probeCache.clear();
+    ctx.ui.notify(`Cleared vision capability probe cache (${getProbeCachePath()}).`, "info");
+    return;
+  }
+
+  let target: Model<Api> | undefined | null = ctx.model;
+  if (arg) {
+    const parsed = parseModelRef(arg);
+    if (!parsed) {
+      ctx.ui.notify(`Invalid model reference: "${arg}". Use "provider/id" or "clear".`, "error");
+      return;
+    }
+    target = ctx.modelRegistry.find(parsed.provider, parsed.id);
+    if (!target) {
+      ctx.ui.notify(`Model not found: ${arg}.`, "error");
+      return;
+    }
+  }
+  if (!target?.provider || !target?.id) {
+    ctx.ui.notify("No active model to probe. Pass a model ref: /vision-watcher probe <provider/id>", "warning");
+    return;
+  }
+
+  const ref = formatModelRef(target.provider, target.id);
+  await routerCache.refreshProviders(ctx.modelRegistry, { providers: [target.provider], force: true });
+  const cap = routerCache.get(target.provider, target.id);
+  if (cap?.vision === false) {
+    probeCache.delete(target.provider, target.id);
+    ctx.ui.notify(
+      `${ref}: text-only (source: router-text-only — /models explicitly omits image input; skipped live probe to avoid proxy vision bridges).`,
+      "info",
+    );
+    return;
+  }
+
+  const result = await probeCache.probe(target, ctx.modelRegistry, { force: true });
+  const explicitOverride = readExplicitTextOnlyOverrides().has(ref);
+  if (!result) {
+    const fallback = resolveModelVisionCapability(target, cap, {
+      hasExplicitTextOverride: explicitOverride,
+      probeCap: getProbeCap(target, ctx.modelRegistry),
+    });
+    ctx.ui.notify(
+      `${ref}: probe inconclusive (not cached). Current effective capability: ${fallback.vision ? "vision" : "text-only"} (source: ${fallback.source}).`,
+      "warning",
+    );
+    return;
+  }
+
+  const statusText = result.vision ? "vision-capable" : "text-only";
+  const detailSuffix = result.detail ? ` · ${result.detail}` : "";
+  const overrideNote =
+    result.vision && explicitOverride
+      ? `\nNote: models.json still has modelOverrides["${target.id}"].input = ["text"] — remove it to use native vision.`
+      : "";
+  ctx.ui.notify(
+    `${ref}: ${statusText} (source: ${result.source}${detailSuffix})${overrideNote}`,
+    "info",
+  );
 }
 
 /** Resolve a `/vision-watcher thinking <level>` argument into a
@@ -1358,8 +1475,9 @@ async function availableVisionModels(ctx: ExtensionCommandContext): Promise<
   for (const m of ctx.modelRegistry.getAvailable()) {
     const ref = formatModelRef(m.provider, m.id);
     const cap = routerCache.get(m.provider, m.id);
+    const probeCap = getProbeCap(m, ctx.modelRegistry);
     const hasExplicitTextOverride = explicitTextOverrides.has(ref);
-    if (!isEffectiveVisionModel(m, cap, { hasExplicitTextOverride })) continue;
+    if (!isEffectiveVisionModel(m, cap, { hasExplicitTextOverride, probeCap })) continue;
     const input = isVisionModel(m) ? m.input : (["text", "image"] as ("text" | "image")[]);
     out.push({ provider: m.provider, id: m.id, name: m.name, input, reasoning: m.reasoning });
   }
@@ -1472,12 +1590,25 @@ async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
 
   const model = ctx.model;
   let active = false;
-  if (isConfigured(config) && model) {
-    active = isHandoffTarget(model, config);
+  let detectionLine = "Capability detection: (no active model)";
+  if (model?.provider && model?.id) {
+    const ref = formatModelRef(model.provider, model.id);
+    const cap = routerCache.get(model.provider, model.id);
+    const probeCap = getProbeCap(model, ctx.modelRegistry);
+    const hasExplicitTextOverride = readExplicitTextOnlyOverrides().has(ref);
+    const resolution = resolveModelVisionCapability(model, cap, { hasExplicitTextOverride, probeCap });
+    const forced = config.handoffModels.includes(ref);
+    const detail = resolution.detail ? ` · ${resolution.detail}` : "";
+    detectionLine = `Capability detection: ${resolution.vision ? "vision" : "text-only"} (source: ${forced ? "handoff-list" : resolution.source}${detail})`;
+    if (isConfigured(config)) {
+      active = isHandoffTarget(model, config, ctx.modelRegistry);
+    }
   }
   lines.push(
     `Active for current model (${model ? formatModelRef(model.provider, model.id) : "none"}): ${active ? "yes" : "no"}`,
   );
+  lines.push(detectionLine);
+  lines.push(`Probe cache: ${getProbeCachePath()}`);
 
   ctx.ui.notify(lines.join("\n"), "info");
 }

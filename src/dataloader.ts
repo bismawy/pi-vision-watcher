@@ -249,6 +249,12 @@ export class DescriptionLoader implements Disposable {
     return promise;
   }
 
+  /** Clear all cached image descriptions (e.g. when the user changes the
+   *  configured vision model or describer settings via `/vision-watcher`). */
+  clearCache(): void {
+    this.cache.clear();
+  }
+
   /** Abandon any in-flight batch and clear turn context. Used on session reset
    *  (the batch's turn is gone) — also exposed via `[Symbol.dispose]` so a
    *  `using` binding can scope a loader lifetime. The description cache is

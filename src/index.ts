@@ -319,7 +319,8 @@ export function isKnownTextOnlyFalselyVision(
   if (/deepseek[-_./\s]*(?:v[34]|r1|chat|coder|reasoner)/.test(n)) return true;
   if (/glm[-_./\s]*[45]/.test(n)) return true;
   if (/\bmercury[-_./\s]*(?:2|3|coder|decide|small|mini)\b/.test(n)) return true;
-  if (/\bswe[-_./\s]*[12]\b/.test(n)) return true;
+  // SWE 1 / 1.5 / 2-flash / bare SWE-2 are text-only; SWE-2.1 (swe-2-1 / swe-2.1) is multimodal.
+  if (/\bswe[-_./\s]*(?:1(?:\.\d+)?|2[-_./\s]*flash|2(?![-._]\d))\b/.test(n)) return true;
   if (/\bgpt[-_./\s]*oss\b/.test(n)) return true;
   if (/\bqwen[-_./\s]*(?:2(?:\.5)?|3(?:\.\d+)?)[-_./\s]*coder\b/.test(n)) return true;
   if (/\bllama[-_./\s]*3(?:\.[13])?(?=[-_./\s:]|$)/.test(n)) return true;
@@ -387,23 +388,70 @@ export function isVisionModel(model: { input?: ("text" | "image")[] } | undefine
   return !!model && Array.isArray(model.input) && model.input.includes("image");
 }
 
-/** Determine effective vision capability by combining Pi's registry `input`,
- *  optional live router `/models` metadata, explicit user `modelOverrides`, and
- *  false-vision model heuristics. */
-export function isEffectiveVisionModel(
+export type VisionCapabilitySource =
+  | "models-override"
+  | "router-text-only"
+  | "probe"
+  | "runtime-error"
+  | "heuristic"
+  | "router-vision"
+  | "registry";
+
+export interface VisionCapabilityResolution {
+  vision: boolean;
+  source: VisionCapabilitySource;
+  detail?: string;
+}
+
+export interface VisionCapabilityOptions {
+  hasExplicitTextOverride?: boolean;
+  probeCap?: { vision: boolean; source: "probe" | "runtime-error"; detail?: string } | null;
+}
+
+/** Resolve effective vision capability and the signal source that decided it.
+ *
+ *  Precedence (highest to lowest):
+ *   1. Explicit `models.json` `modelOverrides.<id>.input = ["text"]`.
+ *   2. Router `/models` explicitly declaring text-only (`vision === false`) —
+ *      must beat runtime probes because some proxies run a server-side vision
+ *      bridge on text-only models.
+ *   3. Confirmed runtime probe or runtime image-rejection error (`probeCap`) —
+ *      ground truth that overrides stale name heuristics and lying metadata.
+ *   4. False-vision name heuristic fallback (only when unprobed).
+ *   5. Router `/models` declaring `vision === true`.
+ *   6. Pi registry `model.input`. */
+export function resolveModelVisionCapability(
   model: { id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
   routerCap?: { vision?: boolean; label?: string },
-  options?: { hasExplicitTextOverride?: boolean },
-): boolean {
-  if (!model) return false;
-  if (options?.hasExplicitTextOverride) return false;
+  options?: VisionCapabilityOptions,
+): VisionCapabilityResolution {
+  if (!model) return { vision: false, source: "registry" };
+  if (options?.hasExplicitTextOverride) return { vision: false, source: "models-override" };
+  if (routerCap?.vision === false) return { vision: false, source: "router-text-only" };
+  if (options?.probeCap) {
+    return {
+      vision: options.probeCap.vision,
+      source: options.probeCap.source,
+      detail: options.probeCap.detail,
+    };
+  }
   const label = [model.name, routerCap?.label]
     .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
     .join(" ");
-  if (routerCap?.vision === false) return false;
-  if (isKnownTextOnlyFalselyVision(model.id, label)) return false;
-  if (routerCap?.vision === true) return true;
-  return isVisionModel(model);
+  if (isKnownTextOnlyFalselyVision(model.id, label)) return { vision: false, source: "heuristic" };
+  if (routerCap?.vision === true) return { vision: true, source: "router-vision" };
+  return { vision: isVisionModel(model), source: "registry" };
+}
+
+/** Determine effective vision capability by combining Pi's registry `input`,
+ *  optional live router `/models` metadata, cached runtime probe results,
+ *  explicit user `modelOverrides`, and false-vision model heuristics. */
+export function isEffectiveVisionModel(
+  model: { id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
+  routerCap?: { vision?: boolean; label?: string },
+  options?: VisionCapabilityOptions,
+): boolean {
+  return resolveModelVisionCapability(model, routerCap, options).vision;
 }
 
 /** Merge a parsed config object onto defaults, tolerating missing/invalid fields. */

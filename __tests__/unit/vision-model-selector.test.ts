@@ -453,13 +453,13 @@ describe("VisionModelSelectorComponent", () => {
     expect(row("p/a")).toContain("</> <accent>✓ primary</>");
   });
 
-  it("excludes false-vision text-only router models even when input includes image", () => {
+  it("excludes models whose declared input lacks image", () => {
+    // Router-level filtering (metadata + probes) happens upstream in
+    // availableVisionModels(); the component only re-checks the registry input
+    // of the list it is handed.
     const mixed = [
       { provider: "magpie", id: "remote/agy-cli/gemini-3.8-flash", name: "Gemini 3.8 Flash", input: ["text", "image"] as const },
-      { provider: "magpie", id: "remote/auto/glm-5.3", name: "GLM 5.3", input: ["text", "image"] as const },
-      { provider: "magpie", id: "remote/inception/mercury-3", name: "Mercury 3", input: ["text", "image"] as const },
-      { provider: "magpie", id: "remote/devin/swe-2-flash", name: "SWE-2 Flash", input: ["text", "image"] as const },
-      { provider: "magpie", id: "remote/agy-cli/gpt-oss-120b", name: "GPT-OSS 120B", input: ["text", "image"] as const },
+      { provider: "magpie", id: "remote/auto/glm-5.3", name: "GLM 5.3", input: ["text"] as const },
     ];
     const component = new VisionModelSelectorComponent(
       theme,
@@ -473,9 +473,6 @@ describe("VisionModelSelectorComponent", () => {
     const rendered = component.render(100).join("\n");
     expect(rendered).toContain("magpie/remote/agy-cli/gemini-3.8-flash");
     expect(rendered).not.toContain("glm-5.3");
-    expect(rendered).not.toContain("mercury-3");
-    expect(rendered).not.toContain("swe-2-flash");
-    expect(rendered).not.toContain("gpt-oss-120b");
   });
 
   it("enter selects the highlighted model when currentRef is null without requiring space first", () => {

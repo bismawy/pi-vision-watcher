@@ -19,9 +19,6 @@ export interface RouterModelCapability {
   /** `true` = explicitly supports image input; `false` = explicitly text-only;
    *  `undefined` = omitted or unparseable. */
   vision?: boolean;
-  /** Display name / router label / description used for false-vision heuristics
-   *  on aliased models (e.g. `"Abliterated Large v2 (GLM-5.3, uncensored)"`). */
-  label?: string;
 }
 
 const DIRECT_VENDOR_HOSTS = new Set([
@@ -93,19 +90,6 @@ function extractEntryVision(entry: Record<string, unknown>): boolean | undefined
   );
 }
 
-function extractEntryLabel(entry: Record<string, unknown>): string | undefined {
-  const parts: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of [entry.magpie_label, entry.display_name, entry.name]) {
-    if (typeof raw !== "string") continue;
-    const trimmed = raw.trim();
-    if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
-    seen.add(trimmed.toLowerCase());
-    parts.push(trimmed);
-  }
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
 /** Parse a router `/models` JSON payload into a map keyed by model id. */
 export function parseRouterModelsPayload(payload: unknown): Map<string, RouterModelCapability> {
   const out = new Map<string, RouterModelCapability>();
@@ -124,8 +108,7 @@ export function parseRouterModelsPayload(payload: unknown): Map<string, RouterMo
     if (typeof entry.id !== "string" || !entry.id.trim()) continue;
     const id = entry.id.trim();
     const vision = extractEntryVision(entry);
-    const label = extractEntryLabel(entry);
-    out.set(id, { id, vision, label });
+    out.set(id, { id, vision });
   }
   return out;
 }

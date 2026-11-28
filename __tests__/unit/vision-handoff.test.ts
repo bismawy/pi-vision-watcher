@@ -535,7 +535,13 @@ describe("isKnownTextOnlyFalselyVision", () => {
     expect(isKnownTextOnlyFalselyVision("glm-5.2")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("z-ai/glm-5.3-free")).toBe(true);
     expect(isKnownTextOnlyFalselyVision("glm-4.6")).toBe(true);
-    expect(isKnownTextOnlyFalselyVision("glm-5p3-flash-baseten")).toBe(true);
+  });
+
+  it("does not match multimodal GLM flash variants", () => {
+    expect(isKnownTextOnlyFalselyVision("remote/devin/glm-5-3-flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("GLM-5.3-Flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("glm-5p3-flash-baseten")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("glm-4.6-flash")).toBe(false);
   });
 
   it("does not match multimodal DeepSeek V4.1 minor versions", () => {
@@ -605,13 +611,19 @@ describe("isEffectiveVisionModel", () => {
   });
 
   it("lets confirmed runtime probe results override name heuristics and unverified metadata, while router text-only still wins over probe", () => {
-    const glmFlash = { id: "remote/devin/glm-5-3-flash", name: "GLM-5.3 Flash", input: ["text", "image"] as ("text" | "image")[] };
+    // glm-5-3 (non-flash) is the text-only fixture: the flash variant is
+    // multimodal and escapes the heuristic by design.
+    const glmBase = { id: "remote/devin/glm-5-3", name: "GLM-5.3", input: ["text", "image"] as ("text" | "image")[] };
     // Unprobed -> heuristic fallback
-    expect(resolveModelVisionCapability(glmFlash, { vision: true })).toEqual({ vision: false, source: "heuristic" });
+    expect(resolveModelVisionCapability(glmBase, { vision: true })).toEqual({ vision: false, source: "heuristic" });
     // Confirmed runtime probe overrides heuristic
     expect(
-      resolveModelVisionCapability(glmFlash, { vision: true }, { probeCap: { vision: true, source: "probe", detail: "verified green/blue" } }),
+      resolveModelVisionCapability(glmBase, { vision: true }, { probeCap: { vision: true, source: "probe", detail: "verified green/blue" } }),
     ).toEqual({ vision: true, source: "probe", detail: "verified green/blue" });
+    // Multimodal GLM flash variants never hit the heuristic: explicit router
+    // vision metadata is trusted directly.
+    const glmFlash = { id: "remote/devin/glm-5-3-flash", name: "GLM-5.3 Flash", input: ["text", "image"] as ("text" | "image")[] };
+    expect(resolveModelVisionCapability(glmFlash, { vision: true })).toEqual({ vision: true, source: "router-vision" });
     // Confirmed negative probe overrides lying router + models.json
     const unknownModel = { id: "custom/mystery-v9", name: "Mystery v9", input: ["text", "image"] as ("text" | "image")[] };
     expect(

@@ -538,6 +538,12 @@ describe("isKnownTextOnlyFalselyVision", () => {
     expect(isKnownTextOnlyFalselyVision("glm-5p3-flash-baseten")).toBe(true);
   });
 
+  it("does not match multimodal DeepSeek V4.1 minor versions", () => {
+    expect(isKnownTextOnlyFalselyVision("remote/amd-tokenlab/DeepSeek-V4.1-Flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("deepseek-v4.1-flash")).toBe(false);
+    expect(isKnownTextOnlyFalselyVision("deepseek-v4.1-flash-1017")).toBe(false);
+  });
+
   it("does not match VL/vision variants or unrelated models", () => {
     expect(isKnownTextOnlyFalselyVision("deepseek-vl2")).toBe(false);
     expect(isKnownTextOnlyFalselyVision("deepseek-v4-vision")).toBe(false);

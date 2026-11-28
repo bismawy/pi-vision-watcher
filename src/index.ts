@@ -316,7 +316,9 @@ export function isKnownTextOnlyFalselyVision(
     return false;
   }
   if (/\dv(?=[-_./\s:]|$)/.test(n)) return false; // glm-4v, glm-4.5v — vision variants
-  if (/deepseek[-_./\s]*(?:v[34]|r1|chat|coder|reasoner)/.test(n)) return true;
+  // Base V3/V4 (pro/flash 0731-0813, free aggregators) are text-only; V4.1 (1017)
+  // and later minor versions are multimodal, so `v4` must not match `v4.N`.
+  if (/deepseek[-_./\s]*(?:v[34](?![-_./]\d)|r1|chat|coder|reasoner)/.test(n)) return true;
   if (/glm[-_./\s]*[45]/.test(n)) return true;
   if (/\bmercury[-_./\s]*(?:2|3|coder|decide|small|mini)\b/.test(n)) return true;
   // SWE 1 / 1.5 / 2-flash / bare SWE-2 are text-only; SWE-2.1 (swe-2-1 / swe-2.1) is multimodal.

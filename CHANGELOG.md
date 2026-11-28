@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Stop classifying multimodal `DeepSeek-V4.1-*` (1017 generation) as text-only: the base `v3/v4` name heuristic no longer matches minor versions (`v4.1`), so vision-enabled DeepSeek V4.1 endpoints behind routers (such as AMD Tokenlab) appear in `/vision-watcher` and skip unnecessary handoff. Base `v4-flash`/`v4-pro` aggregator ids are still treated as text-only.
+
 ## [1.5.0] - 2026-11-27
 
 ### Added

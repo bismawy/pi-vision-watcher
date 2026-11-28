@@ -2,12 +2,10 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-28
+
 ### Removed
 - Remove the false-vision name heuristics (`isKnownTextOnlyFalselyVision`) entirely. Vendors keep shipping multimodal variants inside families once labeled text-only (SWE-2.1, DeepSeek-V4.1-Flash, GLM-5.3-Flash), so static regexes were perpetually wrong. Vision capability now comes from: explicit `modelOverrides` → router `/models` per-endpoint modalities → the cached runtime 2-band PNG probe → registry `input`, with the HTTP-400 auto-heal self-correcting any model that still lies about image input.
-
-### Fixed
-- Stop classifying multimodal `DeepSeek-V4.1-*` (1017 generation) as text-only: the base `v3/v4` name heuristic no longer matches minor versions (`v4.1`), so vision-enabled DeepSeek V4.1 endpoints behind routers (such as AMD Tokenlab) appear in `/vision-watcher` and skip unnecessary handoff. Base `v4-flash`/`v4-pro` aggregator ids are still treated as text-only.
-- Stop classifying multimodal GLM `flash` variants (`glm-5.3-flash`, `glm-5p3-flash-baseten`) as text-only: the glm-4/5 heuristic now only fires on non-flash ids. Base `glm-5.3`/`glm-4.x` aggregator ids are still treated as text-only.
 
 ## [1.5.0] - 2026-11-27
 
@@ -188,3 +186,5 @@
 
 ### Added
 - Initial standalone release of `pi-vision-watcher` providing intelligent vision handoff to text-only coding models in Pi.
+## [Unreleased]
+

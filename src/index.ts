@@ -291,48 +291,6 @@ export function isSoftProviderErrorText(text: string): boolean {
   );
 }
 
-/** Models whose registry entries commonly declare image input while the
- *  backend rejects images (DeepSeek V3/V4/R1, GLM 4/5 non-V, Mercury, SWE,
- *  GPT-OSS, Qwen Coder, Llama 3.1/3.3, Codestral/Devstral/Magistral).
- *  Conservative: VL / Vision / Janus / OCR / Omni / *V variants keep image
- *  input unless explicitly tagged text-only. Used for both `/vision-watcher`
- *  filtering and `autoHandoff` so text-only models hand off on FIRST send. */
-export function isKnownTextOnlyFalselyVision(
-  id: string | undefined | null,
-  label?: string | null,
-): boolean {
-  const combined = [id, label]
-    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-    .join(" ");
-  if (!combined) return false;
-  const n = combined.toLowerCase();
-  if (/\btext[-_\s]?only\b/.test(n)) return true;
-  if (
-    n.includes("vl") ||
-    n.includes("vision") ||
-    n.includes("janus") ||
-    /\b(?:ocr|pixtral|llava|internvl|minicpm-v|cogvlm|molmo|qvq|omni)\b/.test(n)
-  ) {
-    return false;
-  }
-  if (/\dv(?=[-_./\s:]|$)/.test(n)) return false; // glm-4v, glm-4.5v — vision variants
-  // Base V3/V4 (pro/flash 0731-0813, free aggregators) are text-only; V4.1 (1017)
-  // and later minor versions are multimodal, so `v4` must not match `v4.N`.
-  if (/deepseek[-_./\s]*(?:v[34](?![-_./]\d)|r1|chat|coder|reasoner)/.test(n)) return true;
-  // Base glm-4/5 ids are text-only; the *flash* variants (glm-5.3-flash,
-  // glm-5p3-flash-baseten) are multimodal (text+image+video+pdf on routers
-  // that label per-endpoint modalities), so "flash" must escape the match.
-  if (/glm[-_./\s]*[45]/.test(n) && !n.includes("flash")) return true;
-  if (/\bmercury[-_./\s]*(?:2|3|coder|decide|small|mini)\b/.test(n)) return true;
-  // SWE 1 / 1.5 / 2-flash / bare SWE-2 are text-only; SWE-2.1 (swe-2-1 / swe-2.1) is multimodal.
-  if (/\bswe[-_./\s]*(?:1(?:\.\d+)?|2[-_./\s]*flash|2(?![-._]\d))\b/.test(n)) return true;
-  if (/\bgpt[-_./\s]*oss\b/.test(n)) return true;
-  if (/\bqwen[-_./\s]*(?:2(?:\.5)?|3(?:\.\d+)?)[-_./\s]*coder\b/.test(n)) return true;
-  if (/\bllama[-_./\s]*3(?:\.[13])?(?=[-_./\s:]|$)/.test(n)) return true;
-  if (/\b(?:codestral|devstral|magistral)\b/.test(n)) return true;
-  return false;
-}
-
 /** Extract the provider error string from a finalized assistant message.
  *  Pi stores it on `errorMessage`; some providers also put the 400 body in a
  *  text content block. */
@@ -398,7 +356,6 @@ export type VisionCapabilitySource =
   | "router-text-only"
   | "probe"
   | "runtime-error"
-  | "heuristic"
   | "router-vision"
   | "registry";
 
@@ -421,10 +378,16 @@ export interface VisionCapabilityOptions {
  *      must beat runtime probes because some proxies run a server-side vision
  *      bridge on text-only models.
  *   3. Confirmed runtime probe or runtime image-rejection error (`probeCap`) —
- *      ground truth that overrides stale name heuristics and lying metadata.
- *   4. False-vision name heuristic fallback (only when unprobed).
- *   5. Router `/models` declaring `vision === true`.
- *   6. Pi registry `model.input`. */
+ *      ground truth that overrides stale or lying metadata.
+ *   4. Router `/models` declaring `vision === true`.
+ *   5. Pi registry `model.input`.
+ *
+ *  Name heuristics were removed (2026-11): vendors keep shipping multimodal
+ *  variants inside families once labeled text-only (SWE-2.1, DeepSeek-V4.1,
+ *  GLM-5.3-Flash), so static regexes were perpetually wrong. Routers that
+ *  label modalities per endpoint (Magpie, OpenRouter) are trusted directly,
+ *  and models behind metadata-less proxies self-correct through the lazy
+ *  runtime probe and the HTTP-400 auto-heal. */
 export function resolveModelVisionCapability(
   model: { id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
   routerCap?: { vision?: boolean; label?: string },
@@ -440,17 +403,13 @@ export function resolveModelVisionCapability(
       detail: options.probeCap.detail,
     };
   }
-  const label = [model.name, routerCap?.label]
-    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-    .join(" ");
-  if (isKnownTextOnlyFalselyVision(model.id, label)) return { vision: false, source: "heuristic" };
   if (routerCap?.vision === true) return { vision: true, source: "router-vision" };
   return { vision: isVisionModel(model), source: "registry" };
 }
 
 /** Determine effective vision capability by combining Pi's registry `input`,
  *  optional live router `/models` metadata, cached runtime probe results,
- *  explicit user `modelOverrides`, and false-vision model heuristics. */
+ *  and explicit user `modelOverrides`. */
 export function isEffectiveVisionModel(
   model: { id?: string; name?: string; input?: ("text" | "image")[] } | undefined | null,
   routerCap?: { vision?: boolean; label?: string },

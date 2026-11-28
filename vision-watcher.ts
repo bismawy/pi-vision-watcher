@@ -377,8 +377,8 @@ function isHandoffTarget(
   // must always run whenever the registry entry is non-vision.
   if (!isVisionModel(model)) return true;
   // Aggregators/routers (Magpie, 9router, omnirouter) often mislabel models as
-  // ["text", "image"] in models.json. Combine router /models metadata, cached
-  // runtime vision probe results, and fallback heuristics.
+  // ["text", "image"] in models.json. Combine router /models metadata with
+  // cached runtime vision probe results.
   const cap = routerCache.get(model.provider, model.id);
   const probeCap = getProbeCap(model, modelRegistry);
   return !isEffectiveVisionModel(model, cap, { probeCap });
@@ -1005,8 +1005,7 @@ export default function (pi: ExtensionAPI) {
     const ref = formatModelRef(model.provider, model.id);
 
     // Record runtime-confirmed rejection in our own capability cache first,
-    // then update models.json only on this confirmed rejection (never from
-    // speculative name heuristics).
+    // then update models.json only on this confirmed rejection.
     probeCache.record(model.provider, model.id, {
       vision: false,
       source: "runtime-error",
@@ -1450,8 +1449,8 @@ function handleTimeoutSubcommand(ctx: ExtensionCommandContext, rest: string): vo
 /** Connected, vision-capable models — the same set the pickers show. Text-only
  *  models can't describe images, so they would only produce
  *  "[Image: description unavailable]" errors. getAvailable() excludes the whole
- *  catalogue of unauthenticated models. Router `/models` metadata and
- *  false-vision heuristics filter out text-only models behind proxies like
+ *  catalogue of unauthenticated models. Router `/models` metadata and cached
+ *  runtime probe results filter out text-only models behind proxies like
  *  Magpie, 9router, and omnirouter. */
 async function availableVisionModels(ctx: ExtensionCommandContext): Promise<
   Array<{

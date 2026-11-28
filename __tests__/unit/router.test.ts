@@ -8,7 +8,7 @@ import {
 } from "../../src/router.js";
 
 describe("parseRouterModelsPayload", () => {
-  it("parses Magpie modalities.input and label metadata", () => {
+  it("parses Magpie modalities.input metadata", () => {
     const map = parseRouterModelsPayload({
       data: [
         {
@@ -32,13 +32,11 @@ describe("parseRouterModelsPayload", () => {
     expect(map.get("remote/auto/glm-5.3")).toEqual({
       id: "remote/auto/glm-5.3",
       vision: false,
-      label: "GLM 5.3 · routing group · Remote · GLM 5.3",
     });
     expect(map.get("remote/agy-cli/gemini-3.8-flash")?.vision).toBe(true);
     expect(map.get("remote/enclave/cyberouter/abliterated-large-v2")).toEqual({
       id: "remote/enclave/cyberouter/abliterated-large-v2",
       vision: undefined,
-      label: "Abliterated Large v2 (GLM-5.3, uncensored)",
     });
   });
 
